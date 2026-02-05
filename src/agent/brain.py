@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 class Brain:
-    def __init__(self, persona_path: str = "config/persona.yaml"):
-        persona = load_persona(persona_path)
+    def __init__(self, persona_path: str = "config/persona.yaml", name: str = "", description: str = ""):
+        persona = load_persona(persona_path, name=name, description=description)
         self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         self._model = settings.llm_model
         self._system_prompt = build_system_prompt(persona)

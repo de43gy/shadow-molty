@@ -23,7 +23,9 @@ async def main() -> None:
     api_key = settings.moltbook_api_key or await storage.get_state("moltbook_api_key") or ""
     moltbook = MoltbookClient(api_key=api_key)
 
-    brain = Brain()
+    agent_name = settings.agent_name or await storage.get_state("agent_name") or ""
+    agent_desc = settings.agent_description or await storage.get_state("agent_description") or ""
+    brain = Brain(name=agent_name, description=agent_desc)
     dp, bot = create_bot(storage, moltbook)
 
     scheduler = create_scheduler(storage, brain, moltbook, bot, settings.telegram_owner_id)

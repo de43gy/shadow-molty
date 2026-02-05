@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 
+import anthropic
+import yaml
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -45,6 +49,39 @@ async def cmd_start(message: Message) -> None:
     await message.answer(f"Shadow-Molty control panel.\n\n{HELP_TEXT}")
 
 
+async def _generate_identity(persona: dict, taken_names: list[str] | None = None) -> dict:
+    """Ask LLM to generate agent name and description based on persona."""
+    interests = ", ".join(persona.get("interests", []))
+    style = persona.get("style", {})
+    tone = style.get("tone", "neutral")
+
+    taken_note = ""
+    if taken_names:
+        taken_note = f"\n\nThese names are already taken, pick something different: {', '.join(taken_names)}"
+
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    resp = await client.messages.create(
+        model=settings.llm_model,
+        max_tokens=256,
+        messages=[{
+            "role": "user",
+            "content": (
+                "You are creating an identity for an AI agent on Moltbook (a social network for AI agents).\n\n"
+                f"Interests: {interests}\n"
+                f"Personality: {tone}\n"
+                f"{taken_note}\n\n"
+                "Generate a unique agent name (one word, CamelCase, creative, memorable) "
+                "and a short description (1-2 sentences).\n\n"
+                "Return ONLY a JSON object: {\"name\": \"...\", \"description\": \"...\"}"
+            ),
+        }],
+    )
+    text = resp.content[0].text.strip()
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    return json.loads(text[start:end])
+
+
 async def cmd_register(message: Message, storage: Storage, moltbook: MoltbookClient) -> None:
     try:
         existing_key = await storage.get_state("moltbook_api_key")
@@ -52,13 +89,38 @@ async def cmd_register(message: Message, storage: Storage, moltbook: MoltbookCli
             await message.answer("Already registered.")
             return
 
+        persona_path = Path("config/persona.yaml")
+        persona = yaml.safe_load(persona_path.read_text(encoding="utf-8"))
+
         name = settings.agent_name
         description = settings.agent_description
 
-        await message.answer(f"Registering as '{name}'...")
-        result = await moltbook.register(name, description)
+        if not name:
+            await message.answer("Generating identity...")
+            identity = await _generate_identity(persona)
+            name = identity["name"]
+            description = identity["description"]
+
+        max_attempts = 5
+        taken_names: list[str] = []
+        for attempt in range(max_attempts):
+            await message.answer(f"Attempt {attempt + 1}/{max_attempts}: registering as '{name}'...")
+            try:
+                result = await moltbook.register(name, description)
+                break
+            except ValueError:
+                taken_names.append(name)
+                if attempt + 1 < max_attempts:
+                    identity = await _generate_identity(persona, taken_names)
+                    name = identity["name"]
+                    description = identity["description"]
+                else:
+                    await message.answer(f"Failed after {max_attempts} attempts — all names taken.")
+                    return
 
         await storage.set_state("moltbook_api_key", result.api_key)
+        await storage.set_state("agent_name", result.name)
+        await storage.set_state("agent_description", description)
         await moltbook.set_api_key(result.api_key)
 
         await message.answer(
