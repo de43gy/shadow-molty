@@ -40,8 +40,9 @@ jobs:
           host: ${{ vars.VPS_HOST }}
           username: ${{ vars.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: DEPLOY_DIR,IMAGE,TELEGRAM_BOT_TOKEN,TELEGRAM_OWNER_ID,ANTHROPIC_API_KEY,AGENT_NAME,LLM_MODEL
+          envs: DEPLOY_DIR,IMAGE,GH_USER,GH_TOKEN,TELEGRAM_BOT_TOKEN,TELEGRAM_OWNER_ID,ANTHROPIC_API_KEY,AGENT_NAME,LLM_MODEL
           script: |
+            echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_USER" --password-stdin
             mkdir -p $DEPLOY_DIR && cd $DEPLOY_DIR
             cat > .env <<EOF
             TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
@@ -65,6 +66,8 @@ jobs:
         env:
           DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
           IMAGE: ${{ env.IMAGE }}
+          GH_USER: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_OWNER_ID: ${{ vars.TELEGRAM_OWNER_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
