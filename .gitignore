@@ -21,3 +21,6 @@ env/
 *.swo
 
 *.log
+
+CLAUDE.md
+.claude/
