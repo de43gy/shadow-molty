@@ -5,7 +5,7 @@ from pydantic import Field
 class Settings(BaseSettings):
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
-    moltbook_api_key: str = Field(alias="MOLTBOOK_API_KEY")
+    moltbook_api_key: str = Field(default="", alias="MOLTBOOK_API_KEY")
     telegram_bot_token: str = Field(alias="TELEGRAM_BOT_TOKEN")
     telegram_owner_id: int = Field(alias="TELEGRAM_OWNER_ID")
     anthropic_api_key: str = Field(alias="ANTHROPIC_API_KEY")

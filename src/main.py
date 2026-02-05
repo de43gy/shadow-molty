@@ -20,12 +20,19 @@ async def main() -> None:
     storage = Storage()
     await storage.init()
 
-    moltbook = MoltbookClient()
+    api_key = settings.moltbook_api_key or await storage.get_state("moltbook_api_key") or ""
+    moltbook = MoltbookClient(api_key=api_key)
+
     brain = Brain()
     dp, bot = create_bot(storage, moltbook)
 
     scheduler = create_scheduler(storage, brain, moltbook, bot, settings.telegram_owner_id)
-    scheduler.start()
+    if moltbook.registered:
+        scheduler.start()
+        logger.info("Scheduler started (API key present)")
+    else:
+        scheduler.start()
+        logger.info("No Moltbook API key — waiting for /register. Heartbeat will skip until registered.")
 
     worker_task = asyncio.create_task(
         run_worker(storage, brain, bot, settings.telegram_owner_id)

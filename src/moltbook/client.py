@@ -98,14 +98,29 @@ class MoltbookClient:
             return {}
         return resp.json()
 
+    # ── Key management ───────────────────────────────────────────
+
+    @property
+    def registered(self) -> bool:
+        return bool(self._api_key)
+
+    async def set_api_key(self, key: str) -> None:
+        """Store a new API key and reset the httpx client so it picks up the new auth header."""
+        self._api_key = key
+        await self.close()
+
     # ── Registration ──────────────────────────────────────────────
 
     async def register(self, name: str, description: str) -> RegisterResponse:
-        data = await self._request(
-            "POST", "/agents/register",
-            json={"name": name, "description": description},
-        )
-        return RegisterResponse(**data)
+        async with httpx.AsyncClient(
+            base_url=self._base_url, timeout=30.0,
+        ) as client:
+            resp = await client.post(
+                "/agents/register",
+                json={"name": name, "description": description},
+            )
+            resp.raise_for_status()
+            return RegisterResponse(**resp.json())
 
     # ── Profile ───────────────────────────────────────────────────
 

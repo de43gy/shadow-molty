@@ -40,11 +40,10 @@ jobs:
           host: ${{ vars.VPS_HOST }}
           username: ${{ vars.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: DEPLOY_DIR,IMAGE,MOLTBOOK_API_KEY,TELEGRAM_BOT_TOKEN,TELEGRAM_OWNER_ID,ANTHROPIC_API_KEY,AGENT_NAME,LLM_MODEL
+          envs: DEPLOY_DIR,IMAGE,TELEGRAM_BOT_TOKEN,TELEGRAM_OWNER_ID,ANTHROPIC_API_KEY,AGENT_NAME,LLM_MODEL
           script: |
             mkdir -p $DEPLOY_DIR && cd $DEPLOY_DIR
             cat > .env <<EOF
-            MOLTBOOK_API_KEY=$MOLTBOOK_API_KEY
             TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
             TELEGRAM_OWNER_ID=$TELEGRAM_OWNER_ID
             ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
@@ -66,7 +65,6 @@ jobs:
         env:
           DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
           IMAGE: ${{ env.IMAGE }}
-          MOLTBOOK_API_KEY: ${{ secrets.MOLTBOOK_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_OWNER_ID: ${{ vars.TELEGRAM_OWNER_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

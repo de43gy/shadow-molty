@@ -57,6 +57,10 @@ async def _heartbeat(
     scheduler.reschedule_job(HEARTBEAT_JOB_ID, trigger=IntervalTrigger(seconds=next_delay))
     logger.info("Next heartbeat in %ds", next_delay)
 
+    if not moltbook.registered:
+        logger.info("Heartbeat skipped (not registered)")
+        return
+
     paused = await storage.get_state("paused")
     if paused == "1":
         logger.info("Heartbeat skipped (paused)")

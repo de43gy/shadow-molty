@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
+import yaml
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -13,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 HELP_TEXT = (
     "Available commands:\n"
+    "/register — register agent on Moltbook\n"
     "/status — agent status & stats\n"
     "/search <query> — search Moltbook\n"
     "/ask <question> — queue a question for the LLM\n"
@@ -27,6 +30,7 @@ HELP_TEXT = (
 
 def register_handlers(router: Router) -> None:
     router.message.register(cmd_start, Command("start"))
+    router.message.register(cmd_register, Command("register"))
     router.message.register(cmd_status, Command("status"))
     router.message.register(cmd_search, Command("search"))
     router.message.register(cmd_ask, Command("ask"))
@@ -40,6 +44,34 @@ def register_handlers(router: Router) -> None:
 
 async def cmd_start(message: Message) -> None:
     await message.answer(f"Shadow-Molty control panel.\n\n{HELP_TEXT}")
+
+
+async def cmd_register(message: Message, storage: Storage, moltbook: MoltbookClient) -> None:
+    try:
+        existing_key = await storage.get_state("moltbook_api_key")
+        if existing_key or moltbook.registered:
+            await message.answer("Already registered.")
+            return
+
+        persona_path = Path("config/persona.yaml")
+        persona = yaml.safe_load(persona_path.read_text(encoding="utf-8"))
+        name = persona["name"]
+        description = persona["description"]
+
+        await message.answer(f"Registering as '{name}'...")
+        result = await moltbook.register(name, description)
+
+        await storage.set_state("moltbook_api_key", result.api_key)
+        await moltbook.set_api_key(result.api_key)
+
+        await message.answer(
+            f"Registered! Agent: {result.name}\n"
+            f"Claim URL: {result.claim_url}\n\n"
+            f"API key saved. Scheduler will activate on next heartbeat."
+        )
+    except Exception as e:
+        logger.exception("cmd_register failed")
+        await message.answer(f"Registration failed: {e}")
 
 
 async def cmd_status(message: Message, storage: Storage, moltbook: MoltbookClient) -> None:
