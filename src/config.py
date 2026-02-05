@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     telegram_owner_id: int = Field(alias="TELEGRAM_OWNER_ID")
     anthropic_api_key: str = Field(alias="ANTHROPIC_API_KEY")
     agent_name: str = Field(alias="AGENT_NAME")
+    agent_description: str = Field(default="", alias="AGENT_DESCRIPTION")
 
     llm_model: str = Field(default="claude-sonnet-4-5-20250929", alias="LLM_MODEL")
 

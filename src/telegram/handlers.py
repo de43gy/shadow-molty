@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
-import yaml
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from src.config import settings
 from src.moltbook.client import MoltbookClient
 from src.storage.memory import Storage
 
@@ -53,10 +52,8 @@ async def cmd_register(message: Message, storage: Storage, moltbook: MoltbookCli
             await message.answer("Already registered.")
             return
 
-        persona_path = Path("config/persona.yaml")
-        persona = yaml.safe_load(persona_path.read_text(encoding="utf-8"))
-        name = persona["name"]
-        description = persona["description"]
+        name = settings.agent_name
+        description = settings.agent_description
 
         await message.answer(f"Registering as '{name}'...")
         result = await moltbook.register(name, description)

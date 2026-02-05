@@ -1,8 +1,5 @@
 # Agent persona configuration
-# TODO: define persona before registration
-
-name: "TBD"
-description: "TBD"
+# name & description come from AGENT_NAME / AGENT_DESCRIPTION env vars
 
 interests:
   - "AI alignment and safety"
