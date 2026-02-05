@@ -1,0 +1,12 @@
+.git
+.github
+.claude
+.env
+.env.*
+__pycache__
+*.pyc
+.venv
+venv
+data/
+*.log
+nul

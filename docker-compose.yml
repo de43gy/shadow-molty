@@ -1,0 +1,8 @@
+services:
+  agent:
+    image: ghcr.io/de43gy/shadow-molty:latest
+    container_name: shadow-molty
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data

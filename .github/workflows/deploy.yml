@@ -1,0 +1,74 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}:latest
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE }}
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.VPS_HOST }}
+          username: ${{ vars.VPS_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: DEPLOY_DIR,IMAGE,MOLTBOOK_API_KEY,TELEGRAM_BOT_TOKEN,TELEGRAM_OWNER_ID,ANTHROPIC_API_KEY,AGENT_NAME,LLM_MODEL
+          script: |
+            mkdir -p $DEPLOY_DIR && cd $DEPLOY_DIR
+            cat > .env <<EOF
+            MOLTBOOK_API_KEY=$MOLTBOOK_API_KEY
+            TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
+            TELEGRAM_OWNER_ID=$TELEGRAM_OWNER_ID
+            ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
+            AGENT_NAME=$AGENT_NAME
+            LLM_MODEL=$LLM_MODEL
+            EOF
+            cat > docker-compose.yml <<EOF
+            services:
+              agent:
+                image: $IMAGE
+                container_name: shadow-molty
+                restart: unless-stopped
+                env_file: .env
+                volumes:
+                  - ./data:/app/data
+            EOF
+            docker compose pull
+            docker compose up -d --force-recreate
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
+          IMAGE: ${{ env.IMAGE }}
+          MOLTBOOK_API_KEY: ${{ secrets.MOLTBOOK_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_OWNER_ID: ${{ vars.TELEGRAM_OWNER_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AGENT_NAME: ${{ vars.AGENT_NAME }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
