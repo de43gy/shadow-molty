@@ -69,9 +69,12 @@ class MoltbookClient:
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
+            headers = {}
+            if self._api_key:
+                headers["Authorization"] = f"Bearer {self._api_key}"
             self._client = httpx.AsyncClient(
                 base_url=self._base_url,
-                headers={"Authorization": f"Bearer {self._api_key}"},
+                headers=headers,
                 timeout=30.0,
             )
         return self._client
@@ -119,6 +122,8 @@ class MoltbookClient:
                 "/agents/register",
                 json={"name": name, "description": description},
             )
+            if resp.status_code == 409:
+                raise ValueError(f"Name '{name}' is already taken on Moltbook")
             resp.raise_for_status()
             return RegisterResponse(**resp.json())
 
