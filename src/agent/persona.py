@@ -4,11 +4,16 @@ from pathlib import Path
 
 import yaml
 
+from src.config import settings
+
 
 def load_persona(path: str = "config/persona.yaml") -> dict:
-    """Load persona config from YAML file."""
+    """Load persona config from YAML file, overlaying name/description from env."""
     with open(Path(path), encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        persona = yaml.safe_load(f) or {}
+    persona["name"] = settings.agent_name
+    persona["description"] = settings.agent_description
+    return persona
 
 
 def build_system_prompt(persona: dict) -> str:
