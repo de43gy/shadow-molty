@@ -16,6 +16,12 @@ SortOrder = Literal["hot", "new", "top", "rising"]
 SearchType = Literal["posts", "comments", "all"]
 
 
+class NameTakenError(Exception):
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"Name '{name}' is already taken on Moltbook")
+
+
 class RateLimiter:
     """Tracks cooldowns to stay within Moltbook rate limits."""
 
@@ -123,9 +129,11 @@ class MoltbookClient:
                 json={"name": name, "description": description},
             )
             if resp.status_code == 409:
-                raise ValueError(f"Name '{name}' is already taken on Moltbook")
+                raise NameTakenError(name)
             resp.raise_for_status()
-            return RegisterResponse(**resp.json())
+            data = resp.json()
+            logger.info("Register response: %s", data)
+            return RegisterResponse(**data)
 
     # ── Profile ───────────────────────────────────────────────────
 

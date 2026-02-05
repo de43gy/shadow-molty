@@ -11,7 +11,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from src.config import settings
-from src.moltbook.client import MoltbookClient
+from src.moltbook.client import MoltbookClient, NameTakenError
 from src.storage.memory import Storage
 
 logger = logging.getLogger(__name__)
@@ -108,7 +108,7 @@ async def cmd_register(message: Message, storage: Storage, moltbook: MoltbookCli
             try:
                 result = await moltbook.register(name, description)
                 break
-            except ValueError:
+            except NameTakenError:
                 taken_names.append(name)
                 if attempt + 1 < max_attempts:
                     identity = await _generate_identity(persona, taken_names)
