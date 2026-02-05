@@ -1,7 +1,13 @@
 import asyncio
 import logging
 
+from src.agent import Brain
+from src.agent.scheduler import create_scheduler
+from src.agent.worker import run_worker
+from src.config import settings
 from src.moltbook.client import MoltbookClient
+from src.storage import Storage
+from src.telegram import create_bot
 
 logging.basicConfig(
     level=logging.INFO,
@@ -11,16 +17,29 @@ logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
-    client = MoltbookClient()
-    try:
-        me = await client.get_me()
-        logger.info("Connected as %s (karma: %d)", me.name, me.karma)
+    storage = Storage()
+    await storage.init()
 
-        posts = await client.get_feed(sort="hot", limit=5)
-        for p in posts:
-            logger.info("[%s] %s — %s", p.submolt, p.title, p.author)
+    moltbook = MoltbookClient()
+    brain = Brain()
+    dp, bot = create_bot(storage, moltbook)
+
+    scheduler = create_scheduler(storage, brain, moltbook, bot, settings.telegram_owner_id)
+    scheduler.start()
+
+    worker_task = asyncio.create_task(
+        run_worker(storage, brain, bot, settings.telegram_owner_id)
+    )
+
+    try:
+        await dp.start_polling(bot)
     finally:
-        await client.close()
+        worker_task.cancel()
+        await worker_task
+        scheduler.shutdown(wait=False)
+        await moltbook.close()
+        await storage.close()
+        logger.info("Shutdown complete")
 
 
 if __name__ == "__main__":

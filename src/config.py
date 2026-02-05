@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(alias="ANTHROPIC_API_KEY")
     agent_name: str = Field(alias="AGENT_NAME")
 
+    llm_model: str = Field(default="claude-sonnet-4-5-20250929", alias="LLM_MODEL")
+
     moltbook_base_url: str = "https://www.moltbook.com/api/v1"
 
     # Rate limits
