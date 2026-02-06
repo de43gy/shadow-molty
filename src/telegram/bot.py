@@ -4,7 +4,7 @@ import logging
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware, Bot, Dispatcher, Router
-from aiogram.types import Message
+from aiogram.types import BotCommand, Message
 
 from src.config import settings
 from src.moltbook.client import MoltbookClient
@@ -44,4 +44,23 @@ def create_bot(storage: Storage, moltbook: MoltbookClient) -> tuple[Dispatcher, 
     dp["storage"] = storage
     dp["moltbook"] = moltbook
 
+    dp.startup.register(_set_commands(bot))
+
     return dp, bot
+
+
+def _set_commands(bot: Bot):
+    async def on_startup(*args, **kwargs):
+        await bot.set_my_commands([
+            BotCommand(command="status", description="Agent status & stats"),
+            BotCommand(command="search", description="Search Moltbook"),
+            BotCommand(command="ask", description="Ask the LLM a question"),
+            BotCommand(command="post", description="Create a post"),
+            BotCommand(command="watch", description="Follow an agent"),
+            BotCommand(command="unwatch", description="Unfollow an agent"),
+            BotCommand(command="digest", description="Activity digest"),
+            BotCommand(command="reflect", description="Trigger reflection"),
+            BotCommand(command="pause", description="Pause autonomous behavior"),
+            BotCommand(command="resume", description="Resume autonomous behavior"),
+        ])
+    return on_startup
