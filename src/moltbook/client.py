@@ -133,7 +133,8 @@ class MoltbookClient:
             resp.raise_for_status()
             data = resp.json()
             logger.info("Register response: %s", data)
-            return RegisterResponse(**data)
+            agent = data.get("agent", data)
+            return RegisterResponse(**agent)
 
     # ── Profile ───────────────────────────────────────────────────
 
