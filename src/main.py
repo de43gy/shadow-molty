@@ -51,15 +51,16 @@ async def main() -> None:
     # Consolidation engine
     consolidation = ConsolidationEngine(storage, memory, client, settings.llm_model)
 
-    # Sync own posts from Moltbook profile on every startup
-    # Use DB-stored name (actual registered name) — env AGENT_NAME may differ
-    registered_name = await storage.get_state("agent_name") or agent_name
-    if moltbook.registered and registered_name:
+    # Sync own posts from Moltbook — get actual name from API (DB state may be lost after wipe)
+    if moltbook.registered:
         try:
-            posts = await moltbook.get_profile_posts(registered_name)
+            me = await moltbook.get_me()
+            # Persist the real registered name so heartbeat & other code can use it
+            await storage.set_state("agent_name", me.name)
+            posts = await moltbook.get_profile_posts(me.name)
             for p in posts:
                 await storage.save_own_post(p)
-            logger.info("Synced %d posts from profile (%s)", len(posts), registered_name)
+            logger.info("Synced %d posts from profile (%s)", len(posts), me.name)
         except Exception:
             logger.warning("Failed to sync own posts from profile", exc_info=True)
 
