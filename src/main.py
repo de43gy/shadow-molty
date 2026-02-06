@@ -51,6 +51,19 @@ async def main() -> None:
     # Consolidation engine
     consolidation = ConsolidationEngine(storage, memory, client, settings.llm_model)
 
+    # Sync own posts from Moltbook (recovers state after DB wipe)
+    if moltbook.registered and agent_name:
+        try:
+            existing = await storage.get_own_posts(limit=1)
+            if not existing:
+                posts = await moltbook.get_profile_posts(agent_name)
+                for p in posts:
+                    await storage.save_own_post(p)
+                if posts:
+                    logger.info("Synced %d own posts from Moltbook profile", len(posts))
+        except Exception:
+            logger.warning("Failed to sync own posts from profile", exc_info=True)
+
     dp, bot = create_bot(storage, moltbook)
 
     scheduler = create_scheduler(

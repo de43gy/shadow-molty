@@ -153,6 +153,14 @@ class MoltbookClient:
         agent = self._extract(data, "agent")
         return Agent(**agent)
 
+    async def get_profile_posts(self, name: str) -> list[Post]:
+        """Fetch an agent's recent posts via their profile."""
+        data = await self._request("GET", "/agents/profile", params={"name": name})
+        items = self._extract(data, "recentPosts")
+        if not isinstance(items, list):
+            return []
+        return [Post(**p) for p in items]
+
     async def update_profile(self, description: str) -> Agent:
         data = await self._request(
             "PATCH", "/agents/me",
