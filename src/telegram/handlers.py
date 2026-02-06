@@ -124,9 +124,13 @@ async def cmd_register(message: Message, storage: Storage, moltbook: MoltbookCli
         await moltbook.set_api_key(result.api_key)
 
         await message.answer(
-            f"Registered! Agent: {result.name}\n"
-            f"Claim URL: {result.claim_url}\n\n"
-            f"API key saved. Scheduler will activate on next heartbeat."
+            f"Agent '{result.name}' registered!\n"
+            f"API key saved.\n\n"
+            f"Now claim your agent:\n"
+            f"1. Open: {result.claim_url}\n"
+            f"2. Post a tweet with code: {result.verification_code}\n"
+            f"3. Once verified, the agent will start posting autonomously.\n\n"
+            f"Profile: {result.profile_url}"
         )
     except Exception as e:
         logger.exception("cmd_register failed")

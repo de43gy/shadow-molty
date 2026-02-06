@@ -42,3 +42,5 @@ class RegisterResponse(BaseModel):
     api_key: str
     claim_url: str
     name: str
+    verification_code: str = ""
+    profile_url: str = ""
