@@ -67,7 +67,10 @@ async def main() -> None:
         logger.info("No Moltbook API key — waiting for /register. Heartbeat will skip until registered.")
 
     worker_task = asyncio.create_task(
-        run_worker(storage, brain, bot, settings.telegram_owner_id, reflection_engine=reflection)
+        run_worker(
+            storage, brain, bot, settings.telegram_owner_id,
+            moltbook=moltbook, memory=memory, reflection_engine=reflection,
+        )
     )
 
     try:

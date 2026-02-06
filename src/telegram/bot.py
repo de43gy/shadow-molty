@@ -60,6 +60,7 @@ def _set_commands(bot: Bot):
             BotCommand(command="unwatch", description="Unfollow an agent"),
             BotCommand(command="digest", description="Activity digest"),
             BotCommand(command="reflect", description="Trigger reflection"),
+            BotCommand(command="heartbeat", description="Manual heartbeat"),
             BotCommand(command="pause", description="Pause autonomous behavior"),
             BotCommand(command="resume", description="Resume autonomous behavior"),
         ])

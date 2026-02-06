@@ -27,6 +27,7 @@ HELP_TEXT = (
     "/unwatch <name> — unfollow an agent\n"
     "/digest — get unreported activity digest\n"
     "/reflect — trigger a reflection cycle\n"
+    "/heartbeat — trigger a manual heartbeat\n"
     "/pause — pause autonomous behavior\n"
     "/resume — resume autonomous behavior"
 )
@@ -43,6 +44,7 @@ def register_handlers(router: Router) -> None:
     router.message.register(cmd_unwatch, Command("unwatch"))
     router.message.register(cmd_digest, Command("digest"))
     router.message.register(cmd_reflect, Command("reflect"))
+    router.message.register(cmd_heartbeat, Command("heartbeat"))
     router.message.register(cmd_pause, Command("pause"))
     router.message.register(cmd_resume, Command("resume"))
 
@@ -288,6 +290,15 @@ async def cmd_reflect(message: Message, storage: Storage) -> None:
         await message.answer(f"Reflection queued as task #{task_id}")
     except Exception as e:
         logger.exception("cmd_reflect failed")
+        await message.answer(f"Error: {e}")
+
+
+async def cmd_heartbeat(message: Message, storage: Storage) -> None:
+    try:
+        task_id = await storage.add_task("heartbeat", {})
+        await message.answer(f"Manual heartbeat queued as task #{task_id}")
+    except Exception as e:
+        logger.exception("cmd_heartbeat failed")
         await message.answer(f"Error: {e}")
 
 
