@@ -89,12 +89,8 @@ class MoltbookClient:
         if self._client and not self._client.is_closed:
             await self._client.aclose()
 
-    async def _request(
-        self,
-        method: str,
-        path: str,
-        **kwargs,
-    ) -> dict:
+    async def _request(self, method: str, path: str, **kwargs) -> dict:
+        """Make an API request and return the raw JSON (with success/message envelope)."""
         client = await self._get_client()
         resp = await client.request(method, path, **kwargs)
         if resp.status_code == 429:
@@ -105,19 +101,14 @@ class MoltbookClient:
         resp.raise_for_status()
         if resp.status_code == 204:
             return {}
-        return self._unwrap(resp.json())
+        return resp.json()
 
     @staticmethod
-    def _unwrap(data: dict) -> dict:
-        """Unwrap Moltbook API envelope: {success, message, <key>: ...} → inner payload."""
-        if not isinstance(data, (dict,)) or "success" not in data:
-            return data
-        meta_keys = {"success", "message"}
-        payload_keys = [k for k in data if k not in meta_keys]
-        if len(payload_keys) == 1:
-            return data[payload_keys[0]]
-        # Multiple payload keys — return without meta
-        return {k: data[k] for k in payload_keys}
+    def _extract(data: dict, key: str) -> dict | list:
+        """Extract a specific key from API envelope response."""
+        if isinstance(data, dict) and key in data:
+            return data[key]
+        return data
 
     # ── Key management ───────────────────────────────────────────
 
@@ -145,26 +136,30 @@ class MoltbookClient:
             resp.raise_for_status()
             data = resp.json()
             logger.info("Register response: %s", data)
-            unwrapped = self._unwrap(data)
-            agent = unwrapped.get("agent", unwrapped) if isinstance(unwrapped, dict) else unwrapped
+            agent = self._extract(data, "agent")
+            if isinstance(agent, dict) and "agent" in agent:
+                agent = agent["agent"]
             return RegisterResponse(**agent)
 
     # ── Profile ───────────────────────────────────────────────────
 
     async def get_me(self) -> Agent:
         data = await self._request("GET", "/agents/me")
-        return Agent(**data)
+        agent = self._extract(data, "agent")
+        return Agent(**agent)
 
     async def get_profile(self, name: str) -> Agent:
         data = await self._request("GET", "/agents/profile", params={"name": name})
-        return Agent(**data)
+        agent = self._extract(data, "agent")
+        return Agent(**agent)
 
     async def update_profile(self, description: str) -> Agent:
         data = await self._request(
             "PATCH", "/agents/me",
             json={"description": description},
         )
-        return Agent(**data)
+        agent = self._extract(data, "agent")
+        return Agent(**agent)
 
     # ── Feed & Posts ──────────────────────────────────────────────
 
@@ -173,7 +168,9 @@ class MoltbookClient:
             "GET", "/feed",
             params={"sort": sort, "limit": limit},
         )
-        items = data if isinstance(data, list) else data.get("posts", data.get("items", []))
+        items = self._extract(data, "posts")
+        if not isinstance(items, list):
+            items = items.get("posts", items.get("items", [])) if isinstance(items, dict) else []
         return [Post(**p) for p in items]
 
     async def get_posts(
@@ -186,7 +183,9 @@ class MoltbookClient:
         if submolt:
             params["submolt"] = submolt
         data = await self._request("GET", "/posts", params=params)
-        items = data if isinstance(data, list) else data.get("posts", data.get("items", []))
+        items = self._extract(data, "posts")
+        if not isinstance(items, list):
+            items = items.get("posts", items.get("items", [])) if isinstance(items, dict) else []
         return [Post(**p) for p in items]
 
     async def create_post(self, submolt: str, title: str, content: str) -> Post:
@@ -195,7 +194,8 @@ class MoltbookClient:
             "POST", "/posts",
             json={"submolt": submolt, "title": title, "content": content},
         )
-        return Post(**data)
+        post = self._extract(data, "post")
+        return Post(**post)
 
     async def delete_post(self, post_id: str) -> None:
         await self._request("DELETE", f"/posts/{post_id}")
@@ -211,7 +211,9 @@ class MoltbookClient:
             "GET", f"/posts/{post_id}/comments",
             params={"sort": sort},
         )
-        items = data if isinstance(data, list) else data.get("comments", data.get("items", []))
+        items = self._extract(data, "comments")
+        if not isinstance(items, list):
+            items = items.get("comments", items.get("items", [])) if isinstance(items, dict) else []
         return [Comment(**c) for c in items]
 
     async def create_comment(
@@ -228,7 +230,8 @@ class MoltbookClient:
             "POST", f"/posts/{post_id}/comments",
             json=body,
         )
-        return Comment(**data)
+        comment = self._extract(data, "comment")
+        return Comment(**comment)
 
     # ── Voting ────────────────────────────────────────────────────
 
