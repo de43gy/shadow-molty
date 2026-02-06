@@ -6,25 +6,55 @@ import logging
 import anthropic
 
 from src.config import settings
-from src.agent.persona import load_persona, build_system_prompt
+from src.agent.persona import load_identity, build_system_prompt
+from src.agent.safety import sanitize_content, spotlight_content
 from src.moltbook.models import Post, Comment
 
 logger = logging.getLogger(__name__)
 
 
 class Brain:
-    def __init__(self, persona_path: str = "config/persona.yaml", name: str = "", description: str = ""):
-        persona = load_persona(persona_path, name=name, description=description)
-        self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    def __init__(
+        self,
+        name: str = "",
+        description: str = "",
+        client: anthropic.AsyncAnthropic | None = None,
+        memory=None,
+    ):
+        self._identity = load_identity(name=name, description=description)
+        self._name = name
+        self._description = description
+        self._client = client or anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         self._model = settings.llm_model
-        self._system_prompt = build_system_prompt(persona)
+        self._system_prompt = build_system_prompt(identity=self._identity)
+        self._memory = memory  # MemoryManager, set later if needed
+
+    def set_memory(self, memory) -> None:
+        self._memory = memory
+
+    def reload_prompt(self) -> None:
+        """Reload identity and rebuild system prompt (after strategy changes)."""
+        self._identity = load_identity(name=self._name, description=self._description)
+        self._system_prompt = build_system_prompt(identity=self._identity)
+        logger.info("System prompt reloaded")
+
+    @property
+    def identity(self) -> dict:
+        return self._identity
 
     async def _ask(self, user_prompt: str, max_tokens: int = 1024) -> str:
         """Send a single-turn message and return the text response."""
+        system = self._system_prompt
+
+        if self._memory:
+            memory_context = await self._memory.get_context_blocks()
+            if memory_context:
+                system += f"\n\n<memory>\n{memory_context}\n</memory>"
+
         response = await self._client.messages.create(
             model=self._model,
             max_tokens=max_tokens,
-            system=self._system_prompt,
+            system=system,
             messages=[{"role": "user", "content": user_prompt}],
         )
         return response.content[0].text
@@ -45,13 +75,36 @@ class Brain:
         self, feed_summary: list[str], recent_own_posts: list[str]
     ) -> dict:
         """Generate an autonomous post. Returns {submolt, title, content}."""
-        prompt = (
+        # Sanitize feed content
+        sanitized_feed = []
+        for t in feed_summary:
+            cleaned, warnings = sanitize_content(t)
+            if warnings:
+                logger.warning("Feed sanitization: %s", warnings)
+            sanitized_feed.append(cleaned)
+
+        feed_text = chr(10).join(f"- {t}" for t in sanitized_feed) or "(empty)"
+        own_text = chr(10).join(f"- {p}" for p in recent_own_posts) or "(none yet)"
+
+        # Recall relevant memories
+        memory_context = ""
+        if self._memory:
+            memories = await self._memory.recall("generate post topics interests", limit=3)
+            if memories:
+                memory_context = "\n\nRelevant memories:\n" + "\n".join(
+                    f"- {m['content'][:150]}" for m in memories
+                )
+
+        trusted = (
             "Generate a new post for Moltbook.\n\n"
-            f"Recent feed topics:\n{chr(10).join(f'- {t}' for t in feed_summary) or '(empty)'}\n\n"
-            f"Your recent posts:\n{chr(10).join(f'- {p}' for p in recent_own_posts) or '(none yet)'}\n\n"
+            f"Your recent posts:\n{own_text}\n"
+            f"{memory_context}\n\n"
             "Return ONLY a JSON object with keys: submolt, title, content.\n"
             "Do not repeat topics you already posted about."
         )
+        untrusted = f"Recent feed topics:\n{feed_text}"
+        prompt = spotlight_content(trusted, untrusted)
+
         try:
             raw = await self._ask(prompt, max_tokens=1500)
             return self._parse_json(raw)
@@ -63,17 +116,25 @@ class Brain:
         self, post: Post, existing_comments: list[Comment]
     ) -> str:
         """Generate a comment for a given post."""
-        comments_text = "\n".join(
+        comments_raw = "\n".join(
             f"- {c.author}: {c.content}" for c in existing_comments
         ) or "(no comments yet)"
 
-        prompt = (
+        # Sanitize untrusted content
+        post_content, pw = sanitize_content(post.content)
+        comments_text, cw = sanitize_content(comments_raw)
+        if pw or cw:
+            logger.warning("Comment context sanitization warnings: %s %s", pw, cw)
+
+        trusted = "Write a comment. Be concise and add value to the discussion."
+        untrusted = (
             f"Post in s/{post.submolt} by {post.author}:\n"
             f"Title: {post.title}\n"
-            f"{post.content}\n\n"
-            f"Existing comments:\n{comments_text}\n\n"
-            "Write a comment. Be concise and add value to the discussion."
+            f"{post_content}\n\n"
+            f"Existing comments:\n{comments_text}"
         )
+        prompt = spotlight_content(trusted, untrusted)
+
         try:
             return await self._ask(prompt, max_tokens=512)
         except Exception:
@@ -84,16 +145,29 @@ class Brain:
         self, feed: list[Post], stats: dict
     ) -> dict:
         """Heartbeat decision: what to do next. Returns {action, params}."""
-        feed_lines = "\n".join(
+        feed_lines_raw = "\n".join(
             f"- [{p.id}] s/{p.submolt} by {p.author}: {p.title} "
-            f"(↑{p.upvotes} 💬{p.comment_count})"
+            f"(up={p.upvotes} comments={p.comment_count})"
             for p in feed[:15]
         ) or "(empty feed)"
 
-        prompt = (
+        feed_lines, warnings = sanitize_content(feed_lines_raw)
+        if warnings:
+            logger.warning("Feed sanitization in decide_action: %s", warnings)
+
+        # Recall memories relevant to decision-making
+        memory_context = ""
+        if self._memory:
+            memories = await self._memory.recall("heartbeat decision what to do", limit=3)
+            if memories:
+                memory_context = "\n\nRelevant memories:\n" + "\n".join(
+                    f"- {m['content'][:150]}" for m in memories
+                )
+
+        trusted = (
             "You are deciding what to do during your periodic heartbeat.\n\n"
-            f"Current feed:\n{feed_lines}\n\n"
-            f"Your stats: {json.dumps(stats)}\n\n"
+            f"Your stats: {json.dumps(stats)}\n"
+            f"{memory_context}\n\n"
             "Choose ONE action:\n"
             "- post: create a new post\n"
             "- comment: comment on a post (provide post_id)\n"
@@ -101,6 +175,9 @@ class Brain:
             "- skip: do nothing this cycle\n\n"
             "Return ONLY a JSON object with keys: action, params (object or null)."
         )
+        untrusted = f"Current feed:\n{feed_lines}"
+        prompt = spotlight_content(trusted, untrusted)
+
         try:
             raw = await self._ask(prompt, max_tokens=512)
             return self._parse_json(raw)
@@ -110,12 +187,18 @@ class Brain:
 
     async def should_interact(self, post: Post) -> bool:
         """Quick check whether a post is worth engaging with."""
-        prompt = (
+        post_content, warnings = sanitize_content(post.content)
+        if warnings:
+            logger.warning("Interaction check sanitization: %s", warnings)
+
+        trusted = "Should you engage with this post? Reply ONLY 'yes' or 'no'."
+        untrusted = (
             f"Post in s/{post.submolt} by {post.author}:\n"
             f"Title: {post.title}\n"
-            f"{post.content}\n\n"
-            "Should you engage with this post? Reply ONLY 'yes' or 'no'."
+            f"{post_content}"
         )
+        prompt = spotlight_content(trusted, untrusted)
+
         try:
             raw = await self._ask(prompt, max_tokens=8)
             return raw.strip().lower().startswith("yes")
@@ -130,11 +213,9 @@ class Brain:
     @staticmethod
     def _parse_json(text: str) -> dict:
         """Extract a JSON object from LLM response text."""
-        # Try raw parse first
         text = text.strip()
         if text.startswith("{"):
             return json.loads(text)
-        # Try extracting from markdown code block
         start = text.find("{")
         end = text.rfind("}") + 1
         if start != -1 and end > start:

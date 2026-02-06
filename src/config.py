@@ -25,5 +25,11 @@ class Settings(BaseSettings):
     heartbeat_min_sec: int = 1800  # 30 min
     heartbeat_max_sec: int = 3600  # 60 min
 
+    # Reflection & consolidation
+    reflection_every_n_heartbeats: int = 10
+    consolidation_interval_min: int = 15
+    episode_compression_age_hours: int = 48
+    episode_compression_importance_threshold: float = 5.0
+
 
 settings = Settings()

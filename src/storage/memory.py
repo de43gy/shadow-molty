@@ -57,6 +57,42 @@ CREATE TABLE IF NOT EXISTS digest_items (
     reported INTEGER DEFAULT 0,
     created_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS strategy_versions (
+    version INTEGER PRIMARY KEY,
+    strategy_yaml TEXT NOT NULL,
+    parent_version INTEGER,
+    trigger TEXT,
+    performance_snapshot TEXT,
+    created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS core_memory (
+    block TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    char_limit INTEGER DEFAULT 1000,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS episodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    importance REAL DEFAULT 5.0,
+    metadata TEXT,
+    created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS insights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    insight TEXT NOT NULL,
+    category TEXT DEFAULT 'general',
+    confidence REAL DEFAULT 0.5,
+    evidence_count INTEGER DEFAULT 1,
+    source_episode_ids TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
 """
 
 
@@ -242,6 +278,190 @@ class Storage:
             ids,
         )
         await self.db.commit()
+
+    # ── Strategy versions ─────────────────────────────────────
+
+    async def save_strategy_version(
+        self, version: int, yaml_text: str, parent: int | None, trigger: str, perf: dict | None = None
+    ) -> None:
+        await self.db.execute(
+            "INSERT OR REPLACE INTO strategy_versions "
+            "(version, strategy_yaml, parent_version, trigger, performance_snapshot, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (version, yaml_text, parent, trigger, json.dumps(perf) if perf else None, _now()),
+        )
+        await self.db.commit()
+
+    async def get_strategy_version(self, version: int) -> dict | None:
+        cur = await self.db.execute(
+            "SELECT * FROM strategy_versions WHERE version = ?", (version,)
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def get_latest_strategy_version(self) -> dict | None:
+        cur = await self.db.execute(
+            "SELECT * FROM strategy_versions ORDER BY version DESC LIMIT 1"
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def get_strategy_history(self, limit: int = 10) -> list[dict]:
+        cur = await self.db.execute(
+            "SELECT * FROM strategy_versions ORDER BY version DESC LIMIT ?", (limit,)
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Core memory ────────────────────────────────────────────
+
+    async def get_core_block(self, block: str) -> dict | None:
+        cur = await self.db.execute(
+            "SELECT * FROM core_memory WHERE block = ?", (block,)
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def set_core_block(self, block: str, content: str, char_limit: int = 1000) -> None:
+        await self.db.execute(
+            "INSERT INTO core_memory (block, content, char_limit, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(block) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at",
+            (block, content[:char_limit], char_limit, _now()),
+        )
+        await self.db.commit()
+
+    async def get_all_core_blocks(self) -> list[dict]:
+        cur = await self.db.execute("SELECT * FROM core_memory ORDER BY block")
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Episodes ───────────────────────────────────────────────
+
+    async def add_episode(
+        self, type: str, content: str, importance: float = 5.0, metadata: dict | None = None
+    ) -> int:
+        cur = await self.db.execute(
+            "INSERT INTO episodes (type, content, importance, metadata, created_at) VALUES (?, ?, ?, ?, ?)",
+            (type, content, importance, json.dumps(metadata) if metadata else None, _now()),
+        )
+        await self.db.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    async def get_recent_episodes(self, limit: int = 50, type: str | None = None) -> list[dict]:
+        if type:
+            cur = await self.db.execute(
+                "SELECT * FROM episodes WHERE type = ? ORDER BY id DESC LIMIT ?", (type, limit)
+            )
+        else:
+            cur = await self.db.execute(
+                "SELECT * FROM episodes ORDER BY id DESC LIMIT ?", (limit,)
+            )
+        rows = await cur.fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["metadata"] = json.loads(d["metadata"]) if d["metadata"] else {}
+            result.append(d)
+        return result
+
+    async def get_episodes_older_than(self, hours: int, importance_below: float) -> list[dict]:
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        cur = await self.db.execute(
+            "SELECT * FROM episodes WHERE created_at < ? AND importance < ? ORDER BY id",
+            (cutoff, importance_below),
+        )
+        rows = await cur.fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["metadata"] = json.loads(d["metadata"]) if d["metadata"] else {}
+            result.append(d)
+        return result
+
+    async def delete_episodes(self, ids: list[int]) -> None:
+        if not ids:
+            return
+        placeholders = ",".join("?" * len(ids))
+        await self.db.execute(f"DELETE FROM episodes WHERE id IN ({placeholders})", ids)
+        await self.db.commit()
+
+    async def get_episode_count(self) -> int:
+        cur = await self.db.execute("SELECT COUNT(*) as cnt FROM episodes")
+        row = await cur.fetchone()
+        return row["cnt"]
+
+    async def search_episodes(self, keywords: list[str], limit: int = 20) -> list[dict]:
+        if not keywords:
+            return await self.get_recent_episodes(limit)
+        conditions = " OR ".join(["content LIKE ?"] * len(keywords))
+        params = [f"%{kw}%" for kw in keywords]
+        params.append(limit)  # type: ignore[arg-type]
+        cur = await self.db.execute(
+            f"SELECT * FROM episodes WHERE ({conditions}) ORDER BY id DESC LIMIT ?",
+            params,
+        )
+        rows = await cur.fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["metadata"] = json.loads(d["metadata"]) if d["metadata"] else {}
+            result.append(d)
+        return result
+
+    # ── Insights ───────────────────────────────────────────────
+
+    async def add_insight(
+        self, insight: str, category: str = "general", confidence: float = 0.5, source_episode_ids: list[int] | None = None
+    ) -> int:
+        cur = await self.db.execute(
+            "INSERT INTO insights (insight, category, confidence, evidence_count, source_episode_ids, created_at, updated_at) "
+            "VALUES (?, ?, ?, 1, ?, ?, ?)",
+            (insight, category, confidence, json.dumps(source_episode_ids or []), _now(), _now()),
+        )
+        await self.db.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    async def get_insights(self, category: str | None = None, min_confidence: float = 0.3) -> list[dict]:
+        if category:
+            cur = await self.db.execute(
+                "SELECT * FROM insights WHERE category = ? AND confidence >= ? ORDER BY confidence DESC",
+                (category, min_confidence),
+            )
+        else:
+            cur = await self.db.execute(
+                "SELECT * FROM insights WHERE confidence >= ? ORDER BY confidence DESC",
+                (min_confidence,),
+            )
+        rows = await cur.fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["source_episode_ids"] = json.loads(d["source_episode_ids"]) if d["source_episode_ids"] else []
+            result.append(d)
+        return result
+
+    async def reinforce_insight(self, insight_id: int) -> None:
+        await self.db.execute(
+            "UPDATE insights SET evidence_count = evidence_count + 1, "
+            "confidence = MIN(1.0, confidence + 0.1), updated_at = ? WHERE id = ?",
+            (_now(), insight_id),
+        )
+        await self.db.commit()
+
+    async def suppress_insight(self, insight_id: int) -> None:
+        await self.db.execute(
+            "UPDATE insights SET confidence = MAX(0.0, confidence - 0.2), updated_at = ? WHERE id = ?",
+            (_now(), insight_id),
+        )
+        await self.db.commit()
+
+    async def delete_low_confidence_insights(self, threshold: float = 0.1) -> int:
+        cur = await self.db.execute(
+            "DELETE FROM insights WHERE confidence < ?", (threshold,)
+        )
+        await self.db.commit()
+        return cur.rowcount
 
     # ── Stats ─────────────────────────────────────────────────
 

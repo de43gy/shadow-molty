@@ -1,7 +1,13 @@
 import asyncio
 import logging
 
+import anthropic
+
 from src.agent import Brain
+from src.agent.consolidation import ConsolidationEngine
+from src.agent.memory import MemoryManager
+from src.agent.persona import load_constitution
+from src.agent.reflection import ReflectionEngine
 from src.agent.scheduler import create_scheduler
 from src.agent.worker import run_worker
 from src.config import settings
@@ -20,15 +26,39 @@ async def main() -> None:
     storage = Storage()
     await storage.init()
 
+    # Shared Anthropic client
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+
     api_key = settings.moltbook_api_key or await storage.get_state("moltbook_api_key") or ""
     moltbook = MoltbookClient(api_key=api_key)
 
     agent_name = settings.agent_name or await storage.get_state("agent_name") or ""
     agent_desc = settings.agent_description or await storage.get_state("agent_description") or ""
-    brain = Brain(name=agent_name, description=agent_desc)
+
+    brain = Brain(name=agent_name, description=agent_desc, client=client)
+
+    # Memory system
+    memory = MemoryManager(storage, client, settings.llm_model)
+    brain.set_memory(memory)
+    await memory.init_core_blocks(brain.identity)
+
+    # Constitution for safety checks
+    constitution = load_constitution()
+
+    # Reflection engine
+    reflection = ReflectionEngine(storage, memory, client, settings.llm_model, constitution)
+
+    # Consolidation engine
+    consolidation = ConsolidationEngine(storage, memory, client, settings.llm_model)
+
     dp, bot = create_bot(storage, moltbook)
 
-    scheduler = create_scheduler(storage, brain, moltbook, bot, settings.telegram_owner_id)
+    scheduler = create_scheduler(
+        storage, brain, moltbook, bot, settings.telegram_owner_id,
+        memory=memory,
+        reflection=reflection,
+        consolidation_engine=consolidation,
+    )
     if moltbook.registered:
         scheduler.start()
         logger.info("Scheduler started (API key present)")
@@ -37,7 +67,7 @@ async def main() -> None:
         logger.info("No Moltbook API key — waiting for /register. Heartbeat will skip until registered.")
 
     worker_task = asyncio.create_task(
-        run_worker(storage, brain, bot, settings.telegram_owner_id)
+        run_worker(storage, brain, bot, settings.telegram_owner_id, reflection_engine=reflection)
     )
 
     try:

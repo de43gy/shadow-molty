@@ -16,6 +16,7 @@ async def run_worker(
     brain: Brain,
     bot: Bot,
     owner_id: int,
+    reflection_engine=None,
     poll_interval: int = 5,
 ) -> None:
     """Async loop that processes pending tasks from the SQLite queue."""
@@ -34,6 +35,21 @@ async def run_worker(
                         answer = await brain.answer_question(payload["question"])
                         await bot.send_message(owner_id, f"Task #{task_id} answer:\n\n{answer}")
                         await storage.complete_task(task_id, {"answer": answer})
+                    elif task_type == "reflect":
+                        if reflection_engine:
+                            result = await reflection_engine.run_reflection_cycle()
+                            if result.get("changes"):
+                                brain.reload_prompt()
+                            msg = (
+                                f"Reflection complete: {result.get('accepted', 0)} changes applied, "
+                                f"{result.get('rejected', 0)} rejected."
+                            )
+                            if result.get("changes"):
+                                msg += f"\nChanges: {result['changes']}"
+                            await bot.send_message(owner_id, msg)
+                            await storage.complete_task(task_id, result)
+                        else:
+                            await storage.fail_task(task_id, "Reflection engine not initialized")
                     else:
                         logger.warning("Unknown task type: %s", task_type)
                         await storage.fail_task(task_id, f"Unknown task type: {task_type}")

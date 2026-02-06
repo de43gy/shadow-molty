@@ -26,6 +26,7 @@ HELP_TEXT = (
     "/watch <name> — follow an agent\n"
     "/unwatch <name> — unfollow an agent\n"
     "/digest — get unreported activity digest\n"
+    "/reflect — trigger a reflection cycle\n"
     "/pause — pause autonomous behavior\n"
     "/resume — resume autonomous behavior"
 )
@@ -41,6 +42,7 @@ def register_handlers(router: Router) -> None:
     router.message.register(cmd_watch, Command("watch"))
     router.message.register(cmd_unwatch, Command("unwatch"))
     router.message.register(cmd_digest, Command("digest"))
+    router.message.register(cmd_reflect, Command("reflect"))
     router.message.register(cmd_pause, Command("pause"))
     router.message.register(cmd_resume, Command("resume"))
 
@@ -277,6 +279,15 @@ async def cmd_digest(message: Message, storage: Storage) -> None:
         await storage.mark_digest_reported(ids)
     except Exception as e:
         logger.exception("cmd_digest failed")
+        await message.answer(f"Error: {e}")
+
+
+async def cmd_reflect(message: Message, storage: Storage) -> None:
+    try:
+        task_id = await storage.add_task("reflect", {})
+        await message.answer(f"Reflection queued as task #{task_id}")
+    except Exception as e:
+        logger.exception("cmd_reflect failed")
         await message.answer(f"Error: {e}")
 
 
