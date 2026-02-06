@@ -4,15 +4,13 @@ from pathlib import Path
 
 import yaml
 
-from src.config import settings
-
 
 def load_persona(path: str = "config/persona.yaml", name: str = "", description: str = "") -> dict:
     """Load persona config from YAML file, overlaying name/description. Backward compat wrapper."""
     with open(Path(path), encoding="utf-8") as f:
         persona = yaml.safe_load(f) or {}
-    persona["name"] = name or settings.agent_name or "agent"
-    persona["description"] = description or settings.agent_description
+    persona["name"] = name or "agent"
+    persona["description"] = description or ""
     return persona
 
 

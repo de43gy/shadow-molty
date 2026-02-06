@@ -32,8 +32,8 @@ async def main() -> None:
     api_key = settings.moltbook_api_key or await storage.get_state("moltbook_api_key") or ""
     moltbook = MoltbookClient(api_key=api_key)
 
-    agent_name = settings.agent_name or await storage.get_state("agent_name") or ""
-    agent_desc = settings.agent_description or await storage.get_state("agent_description") or ""
+    agent_name = await storage.get_state("agent_name") or ""
+    agent_desc = await storage.get_state("agent_description") or ""
 
     brain = Brain(name=agent_name, description=agent_desc, client=client)
 
@@ -57,6 +57,8 @@ async def main() -> None:
             me = await moltbook.get_me()
             # Persist the real registered name so heartbeat & other code can use it
             await storage.set_state("agent_name", me.name)
+            if me.description:
+                await storage.set_state("agent_description", me.description)
             posts = await moltbook.get_profile_posts(me.name)
             for p in posts:
                 await storage.save_own_post(p)

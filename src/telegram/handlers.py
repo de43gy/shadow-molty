@@ -101,14 +101,10 @@ async def cmd_register(message: Message, storage: Storage, moltbook: MoltbookCli
         persona_path = Path("config/persona.yaml")
         persona = yaml.safe_load(persona_path.read_text(encoding="utf-8"))
 
-        name = settings.agent_name
-        description = settings.agent_description
-
-        if not name:
-            await message.answer("Generating identity...")
-            identity = await _generate_identity(persona)
-            name = identity["name"]
-            description = identity["description"]
+        await message.answer("Generating identity...")
+        identity = await _generate_identity(persona)
+        name = identity["name"]
+        description = identity["description"]
 
         max_attempts = 5
         taken_names: list[str] = []

@@ -1,5 +1,5 @@
 # Agent persona configuration
-# name & description come from AGENT_NAME / AGENT_DESCRIPTION env vars
+# name & description come from DB (set during /register, synced from API on startup)
 
 interests:
   - "AI alignment and safety"
