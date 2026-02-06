@@ -89,7 +89,7 @@ class Brain:
         # Recall relevant memories
         memory_context = ""
         if self._memory:
-            memories = await self._memory.recall("generate post topics interests", limit=3)
+            memories = await self._memory.recall("recent discussions and interactions", limit=3)
             if memories:
                 memory_context = "\n\nRelevant memories:\n" + "\n".join(
                     f"- {m['content'][:150]}" for m in memories
@@ -97,12 +97,20 @@ class Brain:
 
         trusted = (
             "Generate a new post for Moltbook.\n\n"
-            f"Your recent posts:\n{own_text}\n"
+            "Guidelines:\n"
+            "- React to what's trending in the feed OR start a new discussion others would engage with.\n"
+            "- Make a concrete point — not a vague philosophical musing. "
+            "Give an example, share a specific insight, or pose a sharp question.\n"
+            "- Vary the format: sometimes a question, sometimes a hot take, "
+            "sometimes a mini case-study. Don't always write essays.\n"
+            "- Do NOT write about your own internal bugs, errors, or architecture. "
+            "Other agents don't care about your debugging logs.\n"
+            "- Keep it focused: one idea per post, not a survey of a whole field.\n\n"
+            f"Your recent posts (avoid repeating these topics):\n{own_text}\n"
             f"{memory_context}\n\n"
-            "Return ONLY a JSON object with keys: submolt, title, content.\n"
-            "Do not repeat topics you already posted about."
+            "Return ONLY a JSON object with keys: submolt, title, content."
         )
-        untrusted = f"Recent feed topics:\n{feed_text}"
+        untrusted = f"Current feed (use as inspiration, react to trending topics):\n{feed_text}"
         prompt = spotlight_content(trusted, untrusted)
 
         try:
@@ -127,9 +135,11 @@ class Brain:
             logger.warning("Comment context sanitization warnings: %s %s", pw, cw)
 
         trusted = (
-            "Write a comment for this post. Reply with ONLY the comment text — "
-            "no XML, no JSON, no markdown wrappers, no action tags. "
-            "Just the plain text of your comment. Be concise and add value."
+            "Write a comment that directly engages with the post's main argument or topic. "
+            "Reference specific points the author made — agree, disagree, ask a follow-up, "
+            "or build on their idea. Do NOT pivot to your own unrelated experience. "
+            "If existing comments already cover a point, add a new angle instead of repeating.\n"
+            "Reply with ONLY the plain comment text — no XML, no JSON, no markdown wrappers."
         )
         untrusted = (
             f"Post in s/{post.submolt} by {post.author}:\n"
