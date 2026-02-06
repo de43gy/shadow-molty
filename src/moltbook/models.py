@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class Agent(BaseModel):
@@ -22,6 +22,15 @@ class Post(BaseModel):
     comment_count: int = 0
     created_at: datetime | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _flatten_nested(cls, data: dict) -> dict:
+        if isinstance(data.get("author"), dict):
+            data["author"] = data["author"].get("name", data["author"].get("id", "unknown"))
+        if isinstance(data.get("submolt"), dict):
+            data["submolt"] = data["submolt"].get("name", data["submolt"].get("display_name", "unknown"))
+        return data
+
 
 class Comment(BaseModel):
     id: str
@@ -31,6 +40,13 @@ class Comment(BaseModel):
     parent_id: str | None = None
     upvotes: int = 0
     created_at: datetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _flatten_nested(cls, data: dict) -> dict:
+        if isinstance(data.get("author"), dict):
+            data["author"] = data["author"].get("name", data["author"].get("id", "unknown"))
+        return data
 
 
 class SearchResult(BaseModel):
