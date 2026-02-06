@@ -64,6 +64,61 @@ class SearchResult(BaseModel):
     comments: list[Comment] = []
 
 
+class DMConversation(BaseModel):
+    conversation_id: str = ""
+    with_agent: str = ""
+    unread_count: int = 0
+    last_message_at: datetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _flatten_nested(cls, data: dict) -> dict:
+        if isinstance(data.get("with_agent"), dict):
+            data["with_agent"] = data["with_agent"].get("name", data["with_agent"].get("id", "unknown"))
+        # Some responses use 'id' instead of 'conversation_id'
+        if "id" in data and "conversation_id" not in data:
+            data["conversation_id"] = data["id"]
+        return data
+
+
+class DMMessage(BaseModel):
+    id: str
+    sender: str = ""
+    content: str = ""
+    needs_human_input: bool = False
+    created_at: datetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _flatten_nested(cls, data: dict) -> dict:
+        if isinstance(data.get("sender"), dict):
+            data["sender"] = data["sender"].get("name", data["sender"].get("id", "unknown"))
+        if data.get("content") is None:
+            data["content"] = ""
+        return data
+
+
+class DMRequest(BaseModel):
+    conversation_id: str = ""
+    from_agent: str = ""
+    message_preview: str = ""
+    created_at: datetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _flatten_nested(cls, data: dict) -> dict:
+        if isinstance(data.get("from"), dict):
+            data["from_agent"] = data["from"].get("name", data["from"].get("id", "unknown"))
+        elif isinstance(data.get("from"), str):
+            data["from_agent"] = data["from"]
+        if isinstance(data.get("from_agent"), dict):
+            data["from_agent"] = data["from_agent"].get("name", data["from_agent"].get("id", "unknown"))
+        # Some responses use 'id' instead of 'conversation_id'
+        if "id" in data and "conversation_id" not in data:
+            data["conversation_id"] = data["id"]
+        return data
+
+
 class RegisterResponse(BaseModel):
     api_key: str
     claim_url: str

@@ -93,6 +93,22 @@ CREATE TABLE IF NOT EXISTS insights (
     created_at TEXT,
     updated_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS seen_comments (
+    comment_id TEXT PRIMARY KEY,
+    post_id TEXT NOT NULL,
+    replied INTEGER DEFAULT 0,
+    seen_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS dm_conversations (
+    conversation_id TEXT PRIMARY KEY,
+    other_agent TEXT NOT NULL,
+    last_seen_message_id TEXT,
+    needs_human INTEGER DEFAULT 0,
+    created_at TEXT,
+    updated_at TEXT
+);
 """
 
 
@@ -463,6 +479,64 @@ class Storage:
         await self.db.commit()
         return cur.rowcount
 
+    # ── Seen comments ──────────────────────────────────────────
+
+    async def mark_comment_seen(self, comment_id: str, post_id: str, replied: bool = False) -> None:
+        await self.db.execute(
+            "INSERT OR IGNORE INTO seen_comments (comment_id, post_id, replied, seen_at) "
+            "VALUES (?, ?, ?, ?)",
+            (comment_id, post_id, int(replied), _now()),
+        )
+        await self.db.commit()
+
+    async def get_seen_comment_ids(self, post_id: str) -> set[str]:
+        cur = await self.db.execute(
+            "SELECT comment_id FROM seen_comments WHERE post_id = ?", (post_id,)
+        )
+        rows = await cur.fetchall()
+        return {r["comment_id"] for r in rows}
+
+    async def mark_comment_replied(self, comment_id: str) -> None:
+        await self.db.execute(
+            "UPDATE seen_comments SET replied = 1 WHERE comment_id = ?", (comment_id,)
+        )
+        await self.db.commit()
+
+    # ── DM conversations ──────────────────────────────────────
+
+    async def upsert_dm_conversation(
+        self, conversation_id: str, other_agent: str, last_seen_message_id: str | None = None
+    ) -> None:
+        now = _now()
+        await self.db.execute(
+            "INSERT INTO dm_conversations (conversation_id, other_agent, last_seen_message_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(conversation_id) DO UPDATE SET updated_at = excluded.updated_at",
+            (conversation_id, other_agent, last_seen_message_id, now, now),
+        )
+        await self.db.commit()
+
+    async def get_dm_conversation(self, conversation_id: str) -> dict | None:
+        cur = await self.db.execute(
+            "SELECT * FROM dm_conversations WHERE conversation_id = ?", (conversation_id,)
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def set_dm_needs_human(self, conversation_id: str, flag: bool) -> None:
+        await self.db.execute(
+            "UPDATE dm_conversations SET needs_human = ?, updated_at = ? WHERE conversation_id = ?",
+            (int(flag), _now(), conversation_id),
+        )
+        await self.db.commit()
+
+    async def update_dm_last_seen(self, conversation_id: str, message_id: str) -> None:
+        await self.db.execute(
+            "UPDATE dm_conversations SET last_seen_message_id = ?, updated_at = ? WHERE conversation_id = ?",
+            (message_id, _now(), conversation_id),
+        )
+        await self.db.commit()
+
     # ── Stats ─────────────────────────────────────────────────
 
     async def get_stats(self) -> dict:
@@ -484,6 +558,11 @@ class Storage:
         )
         watched_row = await watched_cur.fetchone()
 
+        unreplied_cur = await self.db.execute(
+            "SELECT COUNT(*) as cnt FROM seen_comments WHERE replied = 0"
+        )
+        unreplied_row = await unreplied_cur.fetchone()
+
         paused = await self.get_state("paused")
 
         return {
@@ -492,5 +571,6 @@ class Storage:
             "seen_posts": seen_row["cnt"],
             "pending_tasks": pending_row["cnt"],
             "watched_agents": watched_row["cnt"],
+            "unreplied_comments": unreplied_row["cnt"],
             "paused": paused == "1" if paused else False,
         }

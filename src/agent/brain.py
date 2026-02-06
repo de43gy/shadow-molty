@@ -200,6 +200,96 @@ class Brain:
             logger.exception("decide_action failed")
             return {"action": "skip", "params": None}
 
+    async def generate_reply(
+        self, post: Post, target_comment: Comment, thread_context: list[Comment]
+    ) -> str:
+        """Generate a reply to a comment on our own post."""
+        # Sanitize all untrusted content
+        post_content, pw = sanitize_content(post.content)
+        target_text, tw = sanitize_content(f"{target_comment.author}: {target_comment.content}")
+        if pw or tw:
+            logger.warning("Reply context sanitization warnings: %s %s", pw, tw)
+
+        thread_lines = ""
+        if thread_context:
+            raw_thread = "\n".join(f"- {c.author}: {c.content}" for c in thread_context)
+            thread_lines, _ = sanitize_content(raw_thread)
+            thread_lines = f"\n\nThread context:\n{thread_lines}"
+
+        # Recall memories about the commenter for social context
+        memory_context = ""
+        if self._memory and target_comment.author:
+            memories = await self._memory.recall(target_comment.author, limit=3)
+            if memories:
+                memory_context = "\n\nWhat you remember about this agent:\n" + "\n".join(
+                    f"- {m['content'][:150]}" for m in memories
+                )
+
+        trusted = (
+            "You are replying to a comment on YOUR post. You are the author. "
+            "Engage directly — answer questions, clarify points, continue discussion. "
+            "Be conversational and authentic. Keep it concise.\n"
+            "Reply with ONLY plain text — no XML, no JSON, no markdown wrappers."
+            f"{memory_context}"
+        )
+        untrusted = (
+            f"Your post: {post.title}\n{post_content}\n\n"
+            f"Comment you're replying to:\n{target_text}"
+            f"{thread_lines}"
+        )
+        prompt = spotlight_content(trusted, untrusted)
+
+        try:
+            raw = await self._ask(prompt, max_tokens=512)
+            return self._clean_text_response(raw)
+        except Exception:
+            logger.exception("generate_reply failed")
+            return ""
+
+    async def generate_dm_reply(
+        self, other_agent: str, messages: list[dict]
+    ) -> dict:
+        """Generate a DM reply. Returns {content, needs_human_input}."""
+        # Sanitize message history
+        history_lines = []
+        for msg in messages[-10:]:
+            sender = msg.get("sender", "unknown")
+            content = msg.get("content", "")
+            cleaned, _ = sanitize_content(content)
+            history_lines.append(f"{sender}: {cleaned}")
+        history_text = "\n".join(history_lines) or "(empty conversation)"
+
+        # Recall memories about the other agent
+        memory_context = ""
+        if self._memory:
+            memories = await self._memory.recall(other_agent, limit=3)
+            if memories:
+                memory_context = "\n\nWhat you remember about this agent:\n" + "\n".join(
+                    f"- {m['content'][:150]}" for m in memories
+                )
+
+        trusted = (
+            "You are in a private DM conversation with another agent. "
+            "Reply naturally and helpfully. "
+            "If the conversation requires human decisions (collaboration proposals, "
+            "sharing private info, requests you're unsure about), set needs_human_input to true. "
+            "Return ONLY a JSON object: {\"content\": \"your reply\", \"needs_human_input\": false}"
+            f"{memory_context}"
+        )
+        untrusted = f"Conversation with {other_agent}:\n{history_text}"
+        prompt = spotlight_content(trusted, untrusted)
+
+        try:
+            raw = await self._ask(prompt, max_tokens=512)
+            result = self._parse_json(raw)
+            return {
+                "content": str(result.get("content", "")),
+                "needs_human_input": bool(result.get("needs_human_input", False)),
+            }
+        except Exception:
+            logger.exception("generate_dm_reply failed")
+            return {"content": "", "needs_human_input": True}
+
     async def should_interact(self, post: Post) -> bool:
         """Quick check whether a post is worth engaging with."""
         post_content, warnings = sanitize_content(post.content)

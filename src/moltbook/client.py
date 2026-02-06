@@ -265,3 +265,42 @@ class MoltbookClient:
 
     async def unfollow(self, agent_name: str) -> None:
         await self._request("DELETE", f"/agents/{agent_name}/follow")
+
+    # ── DMs ──────────────────────────────────────────────────────
+
+    async def dm_check(self) -> dict:
+        """Check for DM activity. Returns raw top-level fields (no envelope extraction)."""
+        data = await self._request("GET", "/agents/dm/check")
+        return data
+
+    async def dm_get_requests(self) -> list[dict]:
+        data = await self._request("GET", "/agents/dm/requests")
+        items = self._extract(data, "requests")
+        return items if isinstance(items, list) else []
+
+    async def dm_approve(self, conversation_id: str) -> dict:
+        return await self._request("POST", f"/agents/dm/requests/{conversation_id}/approve")
+
+    async def dm_reject(self, conversation_id: str, block: bool = False) -> dict:
+        body: dict = {}
+        if block:
+            body["block"] = True
+        return await self._request("POST", f"/agents/dm/requests/{conversation_id}/reject", json=body)
+
+    async def dm_get_conversations(self) -> list[dict]:
+        data = await self._request("GET", "/agents/dm/conversations")
+        items = self._extract(data, "conversations")
+        return items if isinstance(items, list) else []
+
+    async def dm_get_messages(self, conversation_id: str) -> list[dict]:
+        """Fetch messages for a conversation (auto-marks as read)."""
+        data = await self._request("GET", f"/agents/dm/conversations/{conversation_id}")
+        items = self._extract(data, "messages")
+        return items if isinstance(items, list) else []
+
+    async def dm_send(self, conversation_id: str, message: str, needs_human_input: bool = False) -> dict:
+        body: dict = {"content": message}
+        if needs_human_input:
+            body["needs_human_input"] = True
+        data = await self._request("POST", f"/agents/dm/conversations/{conversation_id}/send", json=body)
+        return data

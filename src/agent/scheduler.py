@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -14,6 +15,7 @@ from src.agent.reflection import ReflectionEngine
 from src.agent.safety import StabilityIndex, validate_action
 from src.config import settings
 from src.moltbook.client import MoltbookClient
+from src.moltbook.models import Comment, Post
 from src.storage.memory import Storage
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,291 @@ def create_scheduler(
     return scheduler
 
 
+def _build_thread_context(target: Comment, all_comments: list[Comment]) -> list[Comment]:
+    """Walk parent_id chain to build conversation thread leading to target."""
+    by_id = {c.id: c for c in all_comments}
+    thread: list[Comment] = []
+    current = target
+    while current.parent_id and current.parent_id in by_id:
+        parent = by_id[current.parent_id]
+        thread.append(parent)
+        current = parent
+    thread.reverse()
+    return thread
+
+
+async def _check_own_post_replies(
+    storage: Storage,
+    brain: Brain,
+    moltbook: MoltbookClient,
+    bot: Bot,
+    owner_id: int,
+    memory: MemoryManager | None = None,
+    max_replies: int = 2,
+) -> int:
+    """Check for new comments on own posts and reply. Returns number of replies sent."""
+    agent_name = await storage.get_state("agent_name")
+    if not agent_name:
+        return 0
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+    own_posts = await storage.get_own_posts(limit=10)
+    recent_posts = [p for p in own_posts if (p.get("created_at") or "") >= cutoff]
+
+    if not recent_posts:
+        return 0
+
+    pending_replies: list[tuple[Post, Comment, list[Comment]]] = []
+
+    for post_row in recent_posts:
+        post_id = post_row["id"]
+        try:
+            comments = await moltbook.get_comments(post_id, sort="new")
+        except Exception:
+            logger.warning("Failed to fetch comments for post %s", post_id)
+            continue
+
+        seen_ids = await storage.get_seen_comment_ids(post_id)
+
+        # Build a Post object for brain
+        post = Post(
+            id=post_id,
+            author=agent_name,
+            submolt=post_row.get("submolt", ""),
+            title=post_row.get("title", ""),
+            content=post_row.get("content", ""),
+        )
+
+        for comment in comments:
+            # Skip own comments
+            if comment.author.lower() == agent_name.lower():
+                if comment.id not in seen_ids:
+                    await storage.mark_comment_seen(comment.id, post_id, replied=True)
+                continue
+
+            if comment.id in seen_ids:
+                continue
+
+            # Mark as seen
+            await storage.mark_comment_seen(comment.id, post_id, replied=False)
+
+            # Queue reply for: top-level comments or direct replies to our comments
+            is_top_level = not comment.parent_id
+            is_reply_to_us = False
+            if comment.parent_id:
+                parent = next((c for c in comments if c.id == comment.parent_id), None)
+                if parent and parent.author.lower() == agent_name.lower():
+                    is_reply_to_us = True
+
+            if is_top_level or is_reply_to_us:
+                thread_ctx = _build_thread_context(comment, comments)
+                pending_replies.append((post, comment, thread_ctx))
+
+    # Process replies FIFO (oldest first), capped at max_replies
+    pending_replies.sort(key=lambda x: x[1].created_at or datetime.min.replace(tzinfo=timezone.utc))
+    replies_sent = 0
+
+    for post, comment, thread_ctx in pending_replies[:max_replies]:
+        try:
+            text = await brain.generate_reply(post, comment, thread_ctx)
+            if not text:
+                logger.warning("Brain returned empty reply for comment %s", comment.id)
+                continue
+
+            reply = await moltbook.create_comment(post.id, text, parent_id=comment.id)
+            await storage.save_own_comment(reply)
+            await storage.mark_comment_replied(comment.id)
+            replies_sent += 1
+
+            logger.info("Replied to %s on post %s", comment.author, post.id)
+
+            if memory:
+                await memory.remember(
+                    "reply",
+                    f"Replied to {comment.author}'s comment on '{post.title}': {text[:200]}",
+                    metadata={"post_id": post.id, "comment_id": comment.id, "author": comment.author},
+                )
+
+            try:
+                await bot.send_message(
+                    owner_id,
+                    f"Replied to {comment.author} on '{post.title}'",
+                )
+            except Exception:
+                logger.exception("Failed to notify about reply")
+
+        except RuntimeError:
+            logger.info("Comment rate limit reached, stopping replies")
+            break
+        except Exception:
+            logger.exception("Failed to reply to comment %s", comment.id)
+
+    if replies_sent:
+        logger.info("Replied to %d comments on own posts", replies_sent)
+    return replies_sent
+
+
+async def _check_dms(
+    storage: Storage,
+    brain: Brain,
+    moltbook: MoltbookClient,
+    bot: Bot,
+    owner_id: int,
+    memory: MemoryManager | None = None,
+) -> None:
+    """Check DMs: auto-approve requests, reply to new messages."""
+    try:
+        check = await moltbook.dm_check()
+    except Exception:
+        logger.warning("DM check failed (endpoint may not exist yet)")
+        return
+
+    has_activity = check.get("has_activity", False)
+    if not has_activity:
+        logger.debug("DM check: no activity")
+        return
+
+    agent_name = await storage.get_state("agent_name") or ""
+
+    # Auto-approve pending requests
+    try:
+        requests = await moltbook.dm_get_requests()
+        for req in requests:
+            conv_id = req.get("conversation_id") or req.get("id", "")
+            from_agent = req.get("from", {})
+            if isinstance(from_agent, dict):
+                from_name = from_agent.get("name", "unknown")
+            else:
+                from_name = str(from_agent)
+
+            try:
+                await moltbook.dm_approve(conv_id)
+                await storage.upsert_dm_conversation(conv_id, from_name)
+                logger.info("Auto-approved DM request from %s", from_name)
+                try:
+                    await bot.send_message(owner_id, f"New DM conversation with {from_name}")
+                except Exception:
+                    pass
+            except Exception:
+                logger.exception("Failed to approve DM from %s", from_name)
+    except Exception:
+        logger.warning("Failed to fetch DM requests")
+
+    # Process conversations with unread messages
+    try:
+        conversations = await moltbook.dm_get_conversations()
+    except Exception:
+        logger.warning("Failed to fetch DM conversations")
+        return
+
+    for conv in conversations:
+        conv_id = conv.get("conversation_id") or conv.get("id", "")
+        unread = conv.get("unread_count", 0)
+        if not unread:
+            continue
+
+        with_agent = conv.get("with_agent", {})
+        if isinstance(with_agent, dict):
+            other_name = with_agent.get("name", "unknown")
+        else:
+            other_name = str(with_agent)
+
+        await storage.upsert_dm_conversation(conv_id, other_name)
+
+        # Check if flagged for human
+        db_conv = await storage.get_dm_conversation(conv_id)
+        if db_conv and db_conv.get("needs_human"):
+            try:
+                await bot.send_message(
+                    owner_id,
+                    f"DM from {other_name} needs your attention ({unread} unread).\n"
+                    f"Use /dm_reply {conv_id} <message>",
+                )
+            except Exception:
+                pass
+            continue
+
+        # Fetch messages
+        try:
+            messages = await moltbook.dm_get_messages(conv_id)
+        except Exception:
+            logger.warning("Failed to fetch messages for DM %s", conv_id)
+            continue
+
+        if not messages:
+            continue
+
+        # Find new messages (after last_seen watermark)
+        last_seen_id = (db_conv or {}).get("last_seen_message_id")
+        if last_seen_id:
+            found_watermark = False
+            new_messages = []
+            for msg in messages:
+                if found_watermark:
+                    new_messages.append(msg)
+                elif msg.get("id") == last_seen_id:
+                    found_watermark = True
+            if not found_watermark:
+                new_messages = messages
+        else:
+            new_messages = messages
+
+        # Skip if no new messages from others
+        incoming = [m for m in new_messages if m.get("sender", {}).get("name", m.get("sender", "")) != agent_name]
+        if not incoming:
+            # Update watermark anyway
+            if messages:
+                await storage.update_dm_last_seen(conv_id, messages[-1].get("id", ""))
+            continue
+
+        # Generate reply
+        try:
+            # Normalize message format for brain
+            normalized = []
+            for msg in messages[-10:]:
+                sender = msg.get("sender", {})
+                if isinstance(sender, dict):
+                    sender_name = sender.get("name", "unknown")
+                else:
+                    sender_name = str(sender)
+                normalized.append({"sender": sender_name, "content": msg.get("content", "")})
+
+            result = await brain.generate_dm_reply(other_name, normalized)
+
+            if not result.get("content"):
+                logger.warning("Brain returned empty DM reply for %s", other_name)
+                continue
+
+            if result.get("needs_human_input"):
+                await storage.set_dm_needs_human(conv_id, True)
+                try:
+                    await bot.send_message(
+                        owner_id,
+                        f"DM with {other_name} needs your input.\n"
+                        f"Last message: {incoming[-1].get('content', '')[:200]}\n"
+                        f"Use /dm_reply {conv_id} <message>",
+                    )
+                except Exception:
+                    pass
+            else:
+                await moltbook.dm_send(conv_id, result["content"])
+                logger.info("Sent DM reply to %s", other_name)
+
+                if memory:
+                    await memory.remember(
+                        "dm",
+                        f"DM with {other_name}: {result['content'][:200]}",
+                        metadata={"conversation_id": conv_id, "other_agent": other_name},
+                    )
+
+        except Exception:
+            logger.exception("Failed to process DM conversation %s", conv_id)
+
+        # Update watermark
+        if messages:
+            await storage.update_dm_last_seen(conv_id, messages[-1].get("id", ""))
+
+
 async def _heartbeat(
     scheduler: AsyncIOScheduler,
     storage: Storage,
@@ -101,6 +388,21 @@ async def _heartbeat(
         count = int(hb_count) + 1 if hb_count else 1
         await storage.set_state("heartbeat_count", str(count))
 
+        # Phase 1: Obligations — reply to comments on own posts, check DMs
+        try:
+            replies_sent = await _check_own_post_replies(
+                storage, brain, moltbook, bot, owner_id, memory
+            )
+        except Exception:
+            logger.exception("_check_own_post_replies failed")
+            replies_sent = 0
+
+        try:
+            await _check_dms(storage, brain, moltbook, bot, owner_id, memory)
+        except Exception:
+            logger.exception("_check_dms failed")
+
+        # Phase 2: Autonomous action
         stats = await storage.get_stats()
         feed = await moltbook.get_feed(sort="new", limit=15)
 

@@ -59,6 +59,8 @@ def _set_commands(bot: Bot):
             BotCommand(command="watch", description="Follow an agent"),
             BotCommand(command="unwatch", description="Unfollow an agent"),
             BotCommand(command="digest", description="Activity digest"),
+            BotCommand(command="dms", description="List DM conversations"),
+            BotCommand(command="dm_reply", description="Reply to a DM"),
             BotCommand(command="reflect", description="Trigger reflection"),
             BotCommand(command="heartbeat", description="Manual heartbeat"),
             BotCommand(command="pause", description="Pause autonomous behavior"),

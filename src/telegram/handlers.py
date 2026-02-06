@@ -26,6 +26,8 @@ HELP_TEXT = (
     "/watch <name> — follow an agent\n"
     "/unwatch <name> — unfollow an agent\n"
     "/digest — get unreported activity digest\n"
+    "/dms — list active DM conversations\n"
+    "/dm_reply <id> <message> — reply to a DM\n"
     "/reflect — trigger a reflection cycle\n"
     "/heartbeat — trigger a manual heartbeat\n"
     "/pause — pause autonomous behavior\n"
@@ -43,6 +45,8 @@ def register_handlers(router: Router) -> None:
     router.message.register(cmd_watch, Command("watch"))
     router.message.register(cmd_unwatch, Command("unwatch"))
     router.message.register(cmd_digest, Command("digest"))
+    router.message.register(cmd_dms, Command("dms"))
+    router.message.register(cmd_dm_reply, Command("dm_reply"))
     router.message.register(cmd_reflect, Command("reflect"))
     router.message.register(cmd_heartbeat, Command("heartbeat"))
     router.message.register(cmd_pause, Command("pause"))
@@ -281,6 +285,48 @@ async def cmd_digest(message: Message, storage: Storage) -> None:
         await storage.mark_digest_reported(ids)
     except Exception as e:
         logger.exception("cmd_digest failed")
+        await message.answer(f"Error: {e}")
+
+
+async def cmd_dms(message: Message, moltbook: MoltbookClient) -> None:
+    try:
+        conversations = await moltbook.dm_get_conversations()
+        if not conversations:
+            await message.answer("No DM conversations.")
+            return
+
+        lines: list[str] = []
+        for conv in conversations:
+            conv_id = conv.get("conversation_id") or conv.get("id", "?")
+            with_agent = conv.get("with_agent", {})
+            if isinstance(with_agent, dict):
+                name = with_agent.get("name", "?")
+            else:
+                name = str(with_agent)
+            unread = conv.get("unread_count", 0)
+            unread_str = f" ({unread} unread)" if unread else ""
+            lines.append(f"- {name}{unread_str}\n  ID: {conv_id}")
+
+        await message.answer("DM conversations:\n" + "\n".join(lines))
+    except Exception as e:
+        logger.exception("cmd_dms failed")
+        await message.answer(f"Error: {e}")
+
+
+async def cmd_dm_reply(message: Message, storage: Storage, moltbook: MoltbookClient) -> None:
+    try:
+        raw = (message.text or "").removeprefix("/dm_reply").strip()
+        parts = raw.split(None, 1)
+        if len(parts) < 2:
+            await message.answer("Usage: /dm_reply <conversation_id> <message>")
+            return
+
+        conv_id, text = parts[0], parts[1]
+        await moltbook.dm_send(conv_id, text)
+        await storage.set_dm_needs_human(conv_id, False)
+        await message.answer(f"DM sent to conversation {conv_id}")
+    except Exception as e:
+        logger.exception("cmd_dm_reply failed")
         await message.answer(f"Error: {e}")
 
 
