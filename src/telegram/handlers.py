@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 import anthropic
+import httpx
 import yaml
 from aiogram import Router
 from aiogram.filters import Command
@@ -308,6 +309,11 @@ async def cmd_dms(message: Message, moltbook: MoltbookClient) -> None:
             lines.append(f"- {name}{unread_str}\n  ID: {conv_id}")
 
         await message.answer("DM conversations:\n" + "\n".join(lines))
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code >= 500:
+            await message.answer("Moltbook DM API is currently unavailable (server error).")
+        else:
+            await message.answer(f"Error: {e}")
     except Exception as e:
         logger.exception("cmd_dms failed")
         await message.answer(f"Error: {e}")

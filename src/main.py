@@ -52,15 +52,19 @@ async def main() -> None:
     consolidation = ConsolidationEngine(storage, memory, client, settings.llm_model)
 
     # Sync own posts from Moltbook (recovers state after DB wipe)
-    if moltbook.registered and agent_name:
+    # Use DB-stored name (actual registered name) — env AGENT_NAME may differ
+    registered_name = await storage.get_state("agent_name") or agent_name
+    if moltbook.registered and registered_name:
         try:
             existing = await storage.get_own_posts(limit=1)
             if not existing:
-                posts = await moltbook.get_profile_posts(agent_name)
+                posts = await moltbook.get_profile_posts(registered_name)
                 for p in posts:
                     await storage.save_own_post(p)
                 if posts:
-                    logger.info("Synced %d own posts from Moltbook profile", len(posts))
+                    logger.info("Synced %d own posts from Moltbook profile (%s)", len(posts), registered_name)
+                else:
+                    logger.info("No posts found on profile for %s", registered_name)
         except Exception:
             logger.warning("Failed to sync own posts from profile", exc_info=True)
 
