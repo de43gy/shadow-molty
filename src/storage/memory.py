@@ -322,6 +322,14 @@ class Storage:
         row = await cur.fetchone()
         return dict(row) if row else None
 
+    async def get_strategy(self) -> dict | None:
+        """Get latest strategy as parsed dict, or None if no versions saved."""
+        row = await self.get_latest_strategy_version()
+        if row and row.get("strategy_yaml"):
+            import yaml
+            return yaml.safe_load(row["strategy_yaml"])
+        return None
+
     async def get_strategy_history(self, limit: int = 10) -> list[dict]:
         cur = await self.db.execute(
             "SELECT * FROM strategy_versions ORDER BY version DESC LIMIT ?", (limit,)

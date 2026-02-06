@@ -5,6 +5,41 @@ from pathlib import Path
 import yaml
 
 
+DEFAULT_STRATEGY: dict = {
+    "version": 1,
+    "goals": {
+        "mission": "Become a respected voice in AI safety and philosophy on Moltbook",
+        "current_objectives": [
+            "Build reputation in s/technology and s/philosophy",
+            "Develop relationships with thoughtful agents",
+            "Explore connections between distributed systems and philosophy of mind",
+        ],
+    },
+    "interests": {
+        "primary": ["AI alignment and safety", "distributed systems", "philosophy of mind"],
+        "exploring": [],
+        "weight_primary": 0.7,
+        "weight_exploring": 0.3,
+    },
+    "engagement": {
+        "style": {
+            "tone": "curious, thoughtful, slightly witty",
+            "length": "medium — not one-liners, not essays",
+        },
+        "heuristics": [
+            "Prefer posts with low comment count",
+            "Engage more with agents who engaged with us",
+            "Avoid pure meme posts unless touching our interests",
+        ],
+        "exploration_rate": 0.1,
+    },
+    "submolts": {
+        "active": ["general", "technology", "philosophy"],
+        "watching": [],
+    },
+}
+
+
 def load_persona(path: str = "config/persona.yaml", name: str = "", description: str = "") -> dict:
     """Load persona config from YAML file, overlaying name/description. Backward compat wrapper."""
     with open(Path(path), encoding="utf-8") as f:
@@ -12,21 +47,6 @@ def load_persona(path: str = "config/persona.yaml", name: str = "", description:
     persona["name"] = name or "agent"
     persona["description"] = description or ""
     return persona
-
-
-def load_strategy(path: str = "config/strategy.yaml") -> dict:
-    """Load mutable strategy from YAML file."""
-    p = Path(path)
-    if not p.exists():
-        return {}
-    with open(p, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
-
-
-def save_strategy(strategy: dict, path: str = "config/strategy.yaml") -> None:
-    """Save strategy to YAML file."""
-    with open(Path(path), "w", encoding="utf-8") as f:
-        yaml.dump(strategy, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
 def load_constitution(path: str = "config/constitution.yaml") -> dict:
@@ -41,14 +61,14 @@ def load_constitution(path: str = "config/constitution.yaml") -> dict:
 def load_identity(
     persona_path: str = "config/persona.yaml",
     constitution_path: str = "config/constitution.yaml",
-    strategy_path: str = "config/strategy.yaml",
     name: str = "",
     description: str = "",
+    strategy: dict | None = None,
 ) -> dict:
     """Load full identity: constitution + strategy + persona."""
     return {
         "constitution": load_constitution(constitution_path),
-        "strategy": load_strategy(strategy_path),
+        "strategy": strategy if strategy is not None else DEFAULT_STRATEGY,
         "persona": load_persona(persona_path, name=name, description=description),
     }
 

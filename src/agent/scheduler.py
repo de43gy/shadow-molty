@@ -471,7 +471,8 @@ async def _heartbeat(
                 logger.info("Reflection triggered: %s", trigger_reason)
                 result = await reflection.run_reflection_cycle()
                 if result.get("changes"):
-                    brain.reload_prompt()
+                    new_strategy = await storage.get_strategy()
+                    brain.reload_prompt(strategy=new_strategy)
                     try:
                         await bot.send_message(
                             owner_id,

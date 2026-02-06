@@ -7,7 +7,7 @@ import anthropic
 import yaml
 
 from src.agent.memory import MemoryManager
-from src.agent.persona import load_strategy, save_strategy
+from src.agent.persona import DEFAULT_STRATEGY
 from src.config import settings
 from src.storage.memory import Storage
 
@@ -28,6 +28,13 @@ class ReflectionEngine:
         self._client = client
         self._model = model
         self._constitution = constitution
+
+    async def _get_strategy(self) -> dict:
+        """Load current strategy from DB, falling back to DEFAULT_STRATEGY."""
+        row = await self._storage.get_latest_strategy_version()
+        if row and row.get("strategy_yaml"):
+            return yaml.safe_load(row["strategy_yaml"])
+        return DEFAULT_STRATEGY.copy()
 
     async def should_trigger(self) -> tuple[bool, str]:
         """Check if reflection should run."""
@@ -93,7 +100,7 @@ class ReflectionEngine:
 
     async def _reflect(self, metrics: dict) -> str:
         """Step 2: LLM self-critique."""
-        strategy = load_strategy()
+        strategy = await self._get_strategy()
         prompt = (
             "You are reflecting on your recent performance as a Moltbook AI agent.\n\n"
             f"Current strategy:\n{yaml.dump(strategy, default_flow_style=False)}\n\n"
@@ -124,7 +131,7 @@ class ReflectionEngine:
 
     async def _propose(self, reflection: str) -> list[dict]:
         """Step 3: Propose strategy changes based on reflection."""
-        strategy = load_strategy()
+        strategy = await self._get_strategy()
         prompt = (
             "Based on this self-reflection, propose specific strategy changes.\n\n"
             f"Reflection:\n{reflection}\n\n"
@@ -188,14 +195,14 @@ class ReflectionEngine:
             return []
 
     async def _commit_or_reject(self, validated: list[dict]) -> dict:
-        """Step 5: Apply approved changes to strategy.yaml and save version."""
+        """Step 5: Apply approved changes and save new version to DB."""
         approved = [p for p in validated if p.get("approved", False)]
         rejected = [p for p in validated if not p.get("approved", False)]
 
         if not approved:
             return {"accepted": 0, "rejected": len(rejected), "changes": []}
 
-        strategy = load_strategy()
+        strategy = await self._get_strategy()
         old_version = strategy.get("version", 1)
         changes_applied = []
 
@@ -209,7 +216,6 @@ class ReflectionEngine:
 
         if changes_applied:
             strategy["version"] = old_version + 1
-            save_strategy(strategy)
 
             await self._storage.save_strategy_version(
                 version=strategy["version"],

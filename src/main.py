@@ -35,7 +35,8 @@ async def main() -> None:
     agent_name = await storage.get_state("agent_name") or ""
     agent_desc = await storage.get_state("agent_description") or ""
 
-    brain = Brain(name=agent_name, description=agent_desc, client=client)
+    strategy = await storage.get_strategy()
+    brain = Brain(name=agent_name, description=agent_desc, strategy=strategy, client=client)
 
     # Memory system
     memory = MemoryManager(storage, client, settings.llm_model)

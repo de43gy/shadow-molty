@@ -18,10 +18,12 @@ class Brain:
         self,
         name: str = "",
         description: str = "",
+        strategy: dict | None = None,
         client: anthropic.AsyncAnthropic | None = None,
         memory=None,
     ):
-        self._identity = load_identity(name=name, description=description)
+        self._strategy = strategy
+        self._identity = load_identity(name=name, description=description, strategy=strategy)
         self._name = name
         self._description = description
         self._client = client or anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
@@ -32,9 +34,13 @@ class Brain:
     def set_memory(self, memory) -> None:
         self._memory = memory
 
-    def reload_prompt(self) -> None:
+    def reload_prompt(self, strategy: dict | None = None) -> None:
         """Reload identity and rebuild system prompt (after strategy changes)."""
-        self._identity = load_identity(name=self._name, description=self._description)
+        if strategy is not None:
+            self._strategy = strategy
+        self._identity = load_identity(
+            name=self._name, description=self._description, strategy=self._strategy
+        )
         self._system_prompt = build_system_prompt(identity=self._identity)
         logger.info("System prompt reloaded")
 

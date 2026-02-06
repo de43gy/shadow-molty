@@ -46,7 +46,8 @@ async def run_worker(
                         if reflection_engine:
                             result = await reflection_engine.run_reflection_cycle()
                             if result.get("changes"):
-                                brain.reload_prompt()
+                                new_strategy = await storage.get_strategy()
+                                brain.reload_prompt(strategy=new_strategy)
                             msg = (
                                 f"Reflection complete: {result.get('accepted', 0)} changes applied, "
                                 f"{result.get('rejected', 0)} rejected."
