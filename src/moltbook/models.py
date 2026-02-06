@@ -40,7 +40,7 @@ class Post(BaseModel):
 class Comment(BaseModel):
     id: str
     post_id: str = ""
-    author: str
+    author: str = ""
     content: str = ""
     parent_id: str | None = None
     upvotes: int = 0
