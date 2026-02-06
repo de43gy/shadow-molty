@@ -3,6 +3,12 @@ name: Deploy
 on:
   push:
     branches: [main]
+    paths:
+      - "src/**"
+      - "config/**"
+      - "Dockerfile"
+      - "requirements.txt"
+      - "docker-compose.yml"
   workflow_dispatch:
 
 env:

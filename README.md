@@ -4,27 +4,27 @@ Autonomous AI agent operating on [Moltbook](https://www.moltbook.com) — a soci
 
 ## Heartbeat
 
-Heartbeat — это основной цикл агента. Каждые 30-60 минут (рандомный интервал) агент:
+Heartbeat is the agent's main loop. Every 30-60 minutes (randomized interval) the agent:
 
-1. Читает ленту Moltbook
-2. Решает что делать: написать пост, оставить комментарий, поставить лайк или пропустить цикл
-3. Проверяет безопасность действия (Task Shield)
-4. Выполняет действие
-5. Записывает событие в эпизодическую память
-6. Проверяет стабильность поведения (StabilityIndex)
-7. При необходимости запускает рефлексию (каждые N heartbeats)
+1. Reads the Moltbook feed
+2. Decides what to do: write a post, leave a comment, upvote, or skip the cycle
+3. Validates the action against safety rules (Task Shield)
+4. Executes the action
+5. Records the event to episodic memory
+6. Checks behavioral stability (StabilityIndex)
+7. Triggers reflection if needed (every N heartbeats)
 
-Первый heartbeat происходит через 30-60 минут после старта контейнера.
+The first heartbeat occurs 30-60 minutes after the container starts.
 
-## Диагностика
+## Diagnostics
 
-### Логи контейнера
+### Container logs
 
 ```bash
 docker logs shadow-molty --tail 100
 ```
 
-При успешном запуске в логах должно быть:
+On successful startup the logs should contain:
 ```
 Scheduler created (first heartbeat in XXXs)
 Consolidation job scheduled (every 15 min)
@@ -32,30 +32,30 @@ Scheduler started (API key present)
 Worker started (poll every 5s)
 ```
 
-Логи heartbeat:
+Filter heartbeat-related logs:
 ```bash
 docker logs shadow-molty 2>&1 | grep -E "Heartbeat|Consolidation|Reflection"
 ```
 
-### Проверка памяти
+### Memory inspection
 
-Core memory — 4 блока, которые всегда присутствуют в промпте агента (`persona`, `goals`, `social_graph`, `domain_knowledge`). Инициализируются при первом запуске.
+Core memory consists of 4 blocks always present in the agent's prompt (`persona`, `goals`, `social_graph`, `domain_knowledge`). Initialized on first launch.
 
 ```bash
 docker exec shadow-molty sqlite3 data/agent.db "SELECT * FROM core_memory;"
 ```
 
-Эпизоды (последние 5):
+Recent episodes (last 5):
 ```bash
 docker exec shadow-molty sqlite3 data/agent.db "SELECT id, type, importance, created_at FROM episodes ORDER BY id DESC LIMIT 5;"
 ```
 
-Инсайты:
+Insights:
 ```bash
 docker exec shadow-molty sqlite3 data/agent.db "SELECT * FROM insights;"
 ```
 
-Версии стратегии:
+Strategy versions:
 ```bash
 docker exec shadow-molty sqlite3 data/agent.db "SELECT version, trigger, created_at FROM strategy_versions;"
 ```
