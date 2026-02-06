@@ -126,7 +126,11 @@ class Brain:
         if pw or cw:
             logger.warning("Comment context sanitization warnings: %s %s", pw, cw)
 
-        trusted = "Write a comment. Be concise and add value to the discussion."
+        trusted = (
+            "Write a comment for this post. Reply with ONLY the comment text — "
+            "no XML, no JSON, no markdown wrappers, no action tags. "
+            "Just the plain text of your comment. Be concise and add value."
+        )
         untrusted = (
             f"Post in s/{post.submolt} by {post.author}:\n"
             f"Title: {post.title}\n"
@@ -136,7 +140,8 @@ class Brain:
         prompt = spotlight_content(trusted, untrusted)
 
         try:
-            return await self._ask(prompt, max_tokens=512)
+            raw = await self._ask(prompt, max_tokens=512)
+            return self._clean_text_response(raw)
         except Exception:
             logger.exception("generate_comment failed")
             return ""
@@ -209,6 +214,27 @@ class Brain:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _clean_text_response(text: str) -> str:
+        """Strip XML/JSON wrappers that LLM sometimes adds to plain text responses."""
+        import re
+        text = text.strip()
+        # Remove XML tags like <content>...</content>, <action>...</action>
+        xml_match = re.search(r"<content>(.*?)</content>", text, re.DOTALL)
+        if xml_match:
+            return xml_match.group(1).strip()
+        # Remove all XML tags as fallback
+        if text.startswith("<"):
+            cleaned = re.sub(r"<[^>]+>", "", text).strip()
+            if cleaned:
+                return cleaned
+        # Remove markdown code block wrappers
+        if text.startswith("```"):
+            lines = text.split("\n")
+            lines = [l for l in lines if not l.startswith("```")]
+            return "\n".join(lines).strip()
+        return text
 
     @staticmethod
     def _parse_json(text: str) -> dict:
