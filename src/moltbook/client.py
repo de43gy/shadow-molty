@@ -159,6 +159,8 @@ class MoltbookClient:
         items = self._extract(data, "recentPosts")
         if not isinstance(items, list):
             return []
+        for p in items:
+            p.setdefault("author", name)
         return [Post(**p) for p in items]
 
     async def update_profile(self, description: str) -> Agent:
