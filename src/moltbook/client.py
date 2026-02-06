@@ -105,7 +105,19 @@ class MoltbookClient:
         resp.raise_for_status()
         if resp.status_code == 204:
             return {}
-        return resp.json()
+        return self._unwrap(resp.json())
+
+    @staticmethod
+    def _unwrap(data: dict) -> dict:
+        """Unwrap Moltbook API envelope: {success, message, <key>: ...} → inner payload."""
+        if not isinstance(data, (dict,)) or "success" not in data:
+            return data
+        meta_keys = {"success", "message"}
+        payload_keys = [k for k in data if k not in meta_keys]
+        if len(payload_keys) == 1:
+            return data[payload_keys[0]]
+        # Multiple payload keys — return without meta
+        return {k: data[k] for k in payload_keys}
 
     # ── Key management ───────────────────────────────────────────
 
@@ -133,7 +145,8 @@ class MoltbookClient:
             resp.raise_for_status()
             data = resp.json()
             logger.info("Register response: %s", data)
-            agent = data.get("agent", data)
+            unwrapped = self._unwrap(data)
+            agent = unwrapped.get("agent", unwrapped) if isinstance(unwrapped, dict) else unwrapped
             return RegisterResponse(**agent)
 
     # ── Profile ───────────────────────────────────────────────────
