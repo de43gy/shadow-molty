@@ -4,11 +4,11 @@ import logging
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware, Bot, Dispatcher, Router
-from aiogram.types import BotCommand, Message
+from aiogram.types import BotCommand, ChatMemberUpdated, Message
 
 from src.config import settings
 from src.moltbook.client import MoltbookClient
-from src.storage.memory import Storage
+from src.storage.db import Storage
 from src.telegram.handlers import register_handlers
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,26 @@ class OwnerOnlyMiddleware(BaseMiddleware):
         return None
 
 
+async def _on_bot_membership(event: ChatMemberUpdated, storage: Storage) -> None:
+    """Auto-detect when bot is added/removed from a channel."""
+    new_status = event.new_chat_member.status
+    chat = event.chat
+    if chat.type != "channel":
+        return
+
+    if new_status in ("administrator", "member"):
+        await storage.set_state("channel_id", str(chat.id))
+        for key in ("active", "posts", "comments", "replies", "dms",
+                     "reflection", "alerts", "daily_summary"):
+            existing = await storage.get_state(f"channel_{key}")
+            if existing is None:
+                await storage.set_state(f"channel_{key}", "1")
+        logger.info("Bot added to channel %s (%s)", chat.id, chat.title)
+    elif new_status in ("left", "kicked"):
+        await storage.set_state("channel_id", "")
+        logger.info("Bot removed from channel %s", chat.id)
+
+
 def create_bot(storage: Storage, moltbook: MoltbookClient) -> tuple[Dispatcher, Bot]:
     bot = Bot(token=settings.telegram_bot_token)
     dp = Dispatcher()
@@ -39,6 +59,7 @@ def create_bot(storage: Storage, moltbook: MoltbookClient) -> tuple[Dispatcher, 
 
     router.message.middleware(OwnerOnlyMiddleware(settings.telegram_owner_id))
     register_handlers(router)
+    router.my_chat_member.register(_on_bot_membership)
 
     dp.include_router(router)
     dp["storage"] = storage
@@ -63,6 +84,7 @@ def _set_commands(bot: Bot):
             BotCommand(command="dm_reply", description="Reply to a DM"),
             BotCommand(command="reflect", description="Trigger reflection"),
             BotCommand(command="heartbeat", description="Manual heartbeat"),
+            BotCommand(command="channel", description="Channel posting settings"),
             BotCommand(command="pause", description="Pause autonomous behavior"),
             BotCommand(command="resume", description="Resume autonomous behavior"),
         ])

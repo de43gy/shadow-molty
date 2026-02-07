@@ -4,14 +4,12 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from aiogram import Bot
-
-from src.agent.brain import Brain
-from src.agent.memory import MemoryManager
-from src.agent.safety import validate_action
+from src.core.brain import Brain
+from src.core.memory import MemoryManager
+from src.core.safety import validate_action
 from src.config import settings
 from src.moltbook.client import MoltbookClient
-from src.storage.memory import Storage
+from src.storage.db import Storage
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +17,6 @@ logger = logging.getLogger(__name__)
 async def run_worker(
     storage: Storage,
     brain: Brain,
-    bot: Bot,
-    owner_id: int,
     moltbook: MoltbookClient | None = None,
     memory: MemoryManager | None = None,
     reflection_engine=None,
@@ -40,7 +36,9 @@ async def run_worker(
                 try:
                     if task_type == "ask":
                         answer = await brain.answer_question(payload["question"])
-                        await bot.send_message(owner_id, f"Task #{task_id} answer:\n\n{answer}")
+                        await storage.emit_event("task_result", {
+                            "task_id": task_id, "task_type": "ask", "answer": answer,
+                        })
                         await storage.complete_task(task_id, {"answer": answer})
                     elif task_type == "reflect":
                         if reflection_engine:
@@ -48,35 +46,36 @@ async def run_worker(
                             if result.get("changes"):
                                 new_strategy = await storage.get_strategy()
                                 brain.reload_prompt(strategy=new_strategy)
-                            msg = (
-                                f"Reflection complete: {result.get('accepted', 0)} changes applied, "
-                                f"{result.get('rejected', 0)} rejected."
-                            )
-                            if result.get("changes"):
-                                msg += f"\nChanges: {result['changes']}"
-                            await bot.send_message(owner_id, msg)
+                            await storage.emit_event("reflection_done", {
+                                "accepted": result.get("accepted", 0),
+                                "rejected": result.get("rejected", 0),
+                                "changes": result.get("changes", []),
+                            })
                             await storage.complete_task(task_id, result)
                         else:
                             await storage.fail_task(task_id, "Reflection engine not initialized")
                     elif task_type == "heartbeat":
                         if moltbook and moltbook.registered:
                             result = await _manual_heartbeat(
-                                storage, brain, moltbook, bot, owner_id, memory
+                                storage, brain, moltbook, memory
                             )
                             await storage.complete_task(task_id, result)
                         else:
                             await storage.fail_task(task_id, "Not registered on Moltbook")
-                            await bot.send_message(owner_id, "Heartbeat failed: not registered.")
+                            await storage.emit_event("task_failed", {
+                                "task_id": task_id, "task_type": "heartbeat",
+                                "error": "Not registered on Moltbook",
+                            })
                     else:
                         logger.warning("Unknown task type: %s", task_type)
                         await storage.fail_task(task_id, f"Unknown task type: {task_type}")
                 except Exception as exc:
                     logger.exception("Task #%d failed", task_id)
                     await storage.fail_task(task_id, str(exc))
-                    try:
-                        await bot.send_message(owner_id, f"Task #{task_id} failed: {exc}")
-                    except Exception:
-                        logger.exception("Failed to notify owner about task failure")
+                    await storage.emit_event("task_failed", {
+                        "task_id": task_id, "task_type": task_type,
+                        "error": str(exc),
+                    })
 
             await asyncio.sleep(poll_interval)
     except asyncio.CancelledError:
@@ -113,8 +112,6 @@ async def _manual_heartbeat(
     storage: Storage,
     brain: Brain,
     moltbook: MoltbookClient,
-    bot: Bot,
-    owner_id: int,
     memory: MemoryManager | None,
 ) -> dict:
     """Execute a manual heartbeat with rate limit checks and detailed report."""
@@ -137,13 +134,10 @@ async def _manual_heartbeat(
     # Rate limit check
     limit_err = await _check_rate_limit(storage, action)
     if limit_err:
-        report = (
-            f"HEARTBEAT REPORT\n\n"
-            f"Feed ({len(feed)} posts):\n" + "\n".join(feed_lines) + "\n\n"
-            f"Decision: {action}\n"
-            f"Blocked: {limit_err}"
-        )
-        await bot.send_message(owner_id, report)
+        await storage.emit_event("heartbeat_report", {
+            "feed_summary": feed_lines, "decision": action,
+            "action_detail": f"Blocked: {limit_err}",
+        })
         return {"action": "skip", "reason": limit_err}
 
     # Task Shield
@@ -153,13 +147,10 @@ async def _manual_heartbeat(
         decision, goals, constitution, brain._client, brain._model
     )
     if not safe:
-        report = (
-            f"HEARTBEAT REPORT\n\n"
-            f"Feed ({len(feed)} posts):\n" + "\n".join(feed_lines) + "\n\n"
-            f"Decision: {action}\n"
-            f"Blocked by safety: {reason}"
-        )
-        await bot.send_message(owner_id, report)
+        await storage.emit_event("heartbeat_report", {
+            "feed_summary": feed_lines, "decision": action,
+            "action_detail": f"Blocked by safety: {reason}",
+        })
         return {"action": "blocked", "reason": reason}
 
     # Execute and build report
@@ -240,13 +231,9 @@ async def _manual_heartbeat(
     else:
         action_detail = "Decided to skip this cycle."
 
-    # Send consolidated report
-    report = (
-        f"HEARTBEAT REPORT\n\n"
-        f"Feed ({len(feed)} posts):\n" + "\n".join(feed_lines) + "\n\n"
-        f"Decision: {action}\n\n"
-        f"{action_detail}"
-    )
-    await bot.send_message(owner_id, report)
+    await storage.emit_event("heartbeat_report", {
+        "feed_summary": feed_lines, "decision": action,
+        "action_detail": action_detail,
+    })
 
     return {"action": action, "params": params}

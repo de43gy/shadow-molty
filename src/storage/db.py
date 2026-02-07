@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 import aiosqlite
 
-from src.moltbook.models import Comment, Post
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS state (
@@ -109,6 +108,14 @@ CREATE TABLE IF NOT EXISTS dm_conversations (
     created_at TEXT,
     updated_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS agent_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    data TEXT NOT NULL,
+    consumed INTEGER DEFAULT 0,
+    created_at TEXT
+);
 """
 
 
@@ -160,7 +167,7 @@ class Storage:
 
     # ── Own posts / comments ──────────────────────────────────
 
-    async def save_own_post(self, post: Post) -> None:
+    async def save_own_post(self, post) -> None:
         await self.db.execute(
             "INSERT OR REPLACE INTO own_posts (id, submolt, title, content, created_at) "
             "VALUES (?, ?, ?, ?, ?)",
@@ -168,7 +175,7 @@ class Storage:
         )
         await self.db.commit()
 
-    async def save_own_comment(self, comment: Comment) -> None:
+    async def save_own_comment(self, comment) -> None:
         await self.db.execute(
             "INSERT OR REPLACE INTO own_comments (id, post_id, content, created_at) "
             "VALUES (?, ?, ?, ?)",
@@ -544,6 +551,36 @@ class Storage:
             (message_id, _now(), conversation_id),
         )
         await self.db.commit()
+
+    # ── Agent events ─────────────────────────────────────────
+
+    async def emit_event(self, type: str, data: dict) -> None:
+        await self.db.execute(
+            "INSERT INTO agent_events (type, data, consumed, created_at) VALUES (?, ?, 0, ?)",
+            (type, json.dumps(data), _now()),
+        )
+        await self.db.commit()
+
+    async def consume_events(self) -> list[dict]:
+        cur = await self.db.execute(
+            "SELECT * FROM agent_events WHERE consumed = 0 ORDER BY id"
+        )
+        rows = await cur.fetchall()
+        if not rows:
+            return []
+        events = []
+        ids = []
+        for r in rows:
+            d = dict(r)
+            d["data"] = json.loads(d["data"]) if d["data"] else {}
+            events.append(d)
+            ids.append(d["id"])
+        placeholders = ",".join("?" * len(ids))
+        await self.db.execute(
+            f"UPDATE agent_events SET consumed = 1 WHERE id IN ({placeholders})", ids
+        )
+        await self.db.commit()
+        return events
 
     # ── Stats ─────────────────────────────────────────────────
 

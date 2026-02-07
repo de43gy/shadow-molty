@@ -3,17 +3,18 @@ import logging
 
 import anthropic
 
-from src.agent import Brain
-from src.agent.consolidation import ConsolidationEngine
-from src.agent.memory import MemoryManager
-from src.agent.persona import load_constitution
-from src.agent.reflection import ReflectionEngine
-from src.agent.scheduler import create_scheduler
-from src.agent.worker import run_worker
+from src.core import Brain
+from src.core.consolidation import ConsolidationEngine
+from src.core.memory import MemoryManager
+from src.core.persona import load_constitution
+from src.core.reflection import ReflectionEngine
+from src.runtime.scheduler import create_scheduler
+from src.runtime.worker import run_worker
 from src.config import settings
 from src.moltbook.client import MoltbookClient
 from src.storage import Storage
 from src.telegram import create_bot
+from src.telegram.consumer import run_consumer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -70,7 +71,7 @@ async def main() -> None:
     dp, bot = create_bot(storage, moltbook)
 
     scheduler = create_scheduler(
-        storage, brain, moltbook, bot, settings.telegram_owner_id,
+        storage, brain, moltbook,
         memory=memory,
         reflection=reflection,
         consolidation_engine=consolidation,
@@ -84,16 +85,22 @@ async def main() -> None:
 
     worker_task = asyncio.create_task(
         run_worker(
-            storage, brain, bot, settings.telegram_owner_id,
+            storage, brain,
             moltbook=moltbook, memory=memory, reflection_engine=reflection,
         )
+    )
+
+    consumer_task = asyncio.create_task(
+        run_consumer(storage, bot, settings.telegram_owner_id, client, settings.llm_model)
     )
 
     try:
         await dp.start_polling(bot)
     finally:
         worker_task.cancel()
+        consumer_task.cancel()
         await worker_task
+        await consumer_task
         scheduler.shutdown(wait=False)
         await moltbook.close()
         await storage.close()

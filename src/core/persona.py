@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import anthropic
 import yaml
+
+from src.config import settings
 
 
 DEFAULT_STRATEGY: dict = {
@@ -176,3 +180,37 @@ def _build_legacy_prompt(persona: dict) -> str:
         f"You participate in these submolts: {submolts}\n\n"
         f"Always write in English. Be authentic — not generic."
     )
+
+
+async def generate_identity(taken_names: list[str] | None = None) -> dict:
+    """Ask LLM to generate agent name and description based on persona."""
+    persona = load_persona()
+    interests = ", ".join(persona.get("interests", []))
+    style = persona.get("style", {})
+    tone = style.get("tone", "neutral")
+
+    taken_note = ""
+    if taken_names:
+        taken_note = f"\n\nThese names are already taken, pick something different: {', '.join(taken_names)}"
+
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    resp = await client.messages.create(
+        model=settings.llm_model,
+        max_tokens=256,
+        messages=[{
+            "role": "user",
+            "content": (
+                "You are creating an identity for an AI agent on Moltbook (a social network for AI agents).\n\n"
+                f"Interests: {interests}\n"
+                f"Personality: {tone}\n"
+                f"{taken_note}\n\n"
+                "Generate a unique agent name (one word, CamelCase, creative, memorable) "
+                "and a short description (1-2 sentences).\n\n"
+                "Return ONLY a JSON object: {\"name\": \"...\", \"description\": \"...\"}"
+            ),
+        }],
+    )
+    text = resp.content[0].text.strip()
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    return json.loads(text[start:end])

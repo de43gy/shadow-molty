@@ -5,18 +5,17 @@ import logging
 import random
 from datetime import datetime, timedelta, timezone
 
-from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
-from src.agent.brain import Brain
-from src.agent.memory import MemoryManager
-from src.agent.reflection import ReflectionEngine
-from src.agent.safety import StabilityIndex, validate_action
+from src.core.brain import Brain
+from src.core.memory import MemoryManager
+from src.core.reflection import ReflectionEngine
+from src.core.safety import StabilityIndex, validate_action
 from src.config import settings
 from src.moltbook.client import MoltbookClient
 from src.moltbook.models import Comment, Post
-from src.storage.memory import Storage
+from src.storage.db import Storage
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +27,6 @@ def create_scheduler(
     storage: Storage,
     brain: Brain,
     moltbook: MoltbookClient,
-    bot: Bot,
-    owner_id: int,
     memory: MemoryManager | None = None,
     reflection: ReflectionEngine | None = None,
     consolidation_engine=None,
@@ -46,8 +43,6 @@ def create_scheduler(
             "storage": storage,
             "brain": brain,
             "moltbook": moltbook,
-            "bot": bot,
-            "owner_id": owner_id,
             "memory": memory,
             "reflection": reflection,
         },
@@ -87,8 +82,6 @@ async def _check_own_post_replies(
     storage: Storage,
     brain: Brain,
     moltbook: MoltbookClient,
-    bot: Bot,
-    owner_id: int,
     memory: MemoryManager | None = None,
     max_replies: int = 2,
 ) -> int:
@@ -175,13 +168,10 @@ async def _check_own_post_replies(
                     metadata={"post_id": post.id, "comment_id": comment.id, "author": comment.author},
                 )
 
-            try:
-                await bot.send_message(
-                    owner_id,
-                    f"Replied to {comment.author} on '{post.title}'",
-                )
-            except Exception:
-                logger.exception("Failed to notify about reply")
+            await storage.emit_event("reply_sent", {
+                "post_title": post.title, "comment_author": comment.author,
+                "reply_text": text[:300],
+            })
 
         except RuntimeError:
             logger.info("Comment rate limit reached, stopping replies")
@@ -198,8 +188,6 @@ async def _check_dms(
     storage: Storage,
     brain: Brain,
     moltbook: MoltbookClient,
-    bot: Bot,
-    owner_id: int,
     memory: MemoryManager | None = None,
 ) -> None:
     """Check DMs: auto-approve requests, reply to new messages."""
@@ -231,10 +219,7 @@ async def _check_dms(
                 await moltbook.dm_approve(conv_id)
                 await storage.upsert_dm_conversation(conv_id, from_name)
                 logger.info("Auto-approved DM request from %s", from_name)
-                try:
-                    await bot.send_message(owner_id, f"New DM conversation with {from_name}")
-                except Exception:
-                    pass
+                await storage.emit_event("dm_approved", {"other_agent": from_name})
             except Exception:
                 logger.exception("Failed to approve DM from %s", from_name)
     except Exception:
@@ -264,14 +249,10 @@ async def _check_dms(
         # Check if flagged for human
         db_conv = await storage.get_dm_conversation(conv_id)
         if db_conv and db_conv.get("needs_human"):
-            try:
-                await bot.send_message(
-                    owner_id,
-                    f"DM from {other_name} needs your attention ({unread} unread).\n"
-                    f"Use /dm_reply {conv_id} <message>",
-                )
-            except Exception:
-                pass
+            await storage.emit_event("dm_needs_human", {
+                "other_agent": other_name, "conversation_id": conv_id,
+                "unread_count": unread,
+            })
             continue
 
         # Fetch messages
@@ -327,18 +308,18 @@ async def _check_dms(
 
             if result.get("needs_human_input"):
                 await storage.set_dm_needs_human(conv_id, True)
-                try:
-                    await bot.send_message(
-                        owner_id,
-                        f"DM with {other_name} needs your input.\n"
-                        f"Last message: {incoming[-1].get('content', '')[:200]}\n"
-                        f"Use /dm_reply {conv_id} <message>",
-                    )
-                except Exception:
-                    pass
+                await storage.emit_event("dm_needs_human", {
+                    "other_agent": other_name, "conversation_id": conv_id,
+                    "last_message": incoming[-1].get("content", "")[:200],
+                    "unread_count": unread,
+                })
             else:
                 await moltbook.dm_send(conv_id, result["content"])
                 logger.info("Sent DM reply to %s", other_name)
+                await storage.emit_event("dm_replied", {
+                    "other_agent": other_name,
+                    "reply_text": result["content"][:300],
+                })
 
                 if memory:
                     await memory.remember(
@@ -360,8 +341,6 @@ async def _heartbeat(
     storage: Storage,
     brain: Brain,
     moltbook: MoltbookClient,
-    bot: Bot,
-    owner_id: int,
     memory: MemoryManager | None = None,
     reflection: ReflectionEngine | None = None,
 ) -> None:
@@ -372,11 +351,13 @@ async def _heartbeat(
 
     if not moltbook.registered:
         logger.info("Heartbeat skipped (not registered)")
+        await storage.emit_event("heartbeat_skip", {"reason": "not registered"})
         return
 
     paused = await storage.get_state("paused")
     if paused == "1":
         logger.info("Heartbeat skipped (paused)")
+        await storage.emit_event("heartbeat_skip", {"reason": "paused"})
         return
 
     # Set heartbeat lock
@@ -391,14 +372,14 @@ async def _heartbeat(
         # Phase 1: Obligations — reply to comments on own posts, check DMs
         try:
             replies_sent = await _check_own_post_replies(
-                storage, brain, moltbook, bot, owner_id, memory
+                storage, brain, moltbook, memory
             )
         except Exception:
             logger.exception("_check_own_post_replies failed")
             replies_sent = 0
 
         try:
-            await _check_dms(storage, brain, moltbook, bot, owner_id, memory)
+            await _check_dms(storage, brain, moltbook, memory)
         except Exception:
             logger.exception("_check_dms failed")
 
@@ -435,14 +416,20 @@ async def _heartbeat(
 
         # Execute action
         if action == "post":
-            await _do_post(storage, brain, moltbook, bot, owner_id, feed, memory)
+            await _do_post(storage, brain, moltbook, feed, memory)
         elif action == "comment":
-            await _do_comment(storage, brain, moltbook, bot, owner_id, feed, params, memory)
+            await _do_comment(storage, brain, moltbook, feed, params, memory)
         elif action == "upvote":
             post_id = params.get("post_id")
             if post_id:
                 await moltbook.upvote_post(post_id)
                 logger.info("Upvoted post %s", post_id)
+                target = next((p for p in feed if p.id == post_id), None)
+                await storage.emit_event("upvoted", {
+                    "post_id": post_id,
+                    "post_title": target.title if target else "",
+                    "post_author": target.author if target else "",
+                })
                 if memory:
                     await memory.remember("upvote", f"Upvoted post {post_id}")
         else:
@@ -455,14 +442,10 @@ async def _heartbeat(
         stability = await asi.compute()
         if stability.get("alert"):
             logger.warning("Stability alert! ASI=%.3f %s", stability["overall"], stability["components"])
-            try:
-                await bot.send_message(
-                    owner_id,
-                    f"Stability alert: ASI={stability['overall']:.2f}\n"
-                    f"Components: {json.dumps(stability['components'])}",
-                )
-            except Exception:
-                logger.exception("Failed to send stability alert")
+            await storage.emit_event("stability_alert", {
+                "overall": stability["overall"],
+                "components": stability["components"],
+            })
 
         # Reflection trigger
         if reflection:
@@ -473,14 +456,11 @@ async def _heartbeat(
                 if result.get("changes"):
                     new_strategy = await storage.get_strategy()
                     brain.reload_prompt(strategy=new_strategy)
-                    try:
-                        await bot.send_message(
-                            owner_id,
-                            f"Reflection complete: {result['accepted']} changes applied, "
-                            f"{result['rejected']} rejected.\nChanges: {result['changes']}",
-                        )
-                    except Exception:
-                        logger.exception("Failed to notify about reflection")
+                    await storage.emit_event("reflection_done", {
+                        "accepted": result.get("accepted", 0),
+                        "rejected": result.get("rejected", 0),
+                        "changes": result["changes"],
+                    })
 
     except Exception:
         logger.exception("Heartbeat failed")
@@ -492,8 +472,6 @@ async def _do_post(
     storage: Storage,
     brain: Brain,
     moltbook: MoltbookClient,
-    bot: Bot,
-    owner_id: int,
     feed: list,
     memory: MemoryManager | None = None,
 ) -> None:
@@ -522,18 +500,16 @@ async def _do_post(
             metadata={"post_id": post.id, "submolt": post.submolt},
         )
 
-    try:
-        await bot.send_message(owner_id, f"New post in s/{post.submolt}: {post.title}")
-    except Exception:
-        logger.exception("Failed to notify owner about new post")
+    await storage.emit_event("post_created", {
+        "submolt": post.submolt, "title": post.title,
+        "content": (post.content or "")[:300], "post_id": post.id,
+    })
 
 
 async def _do_comment(
     storage: Storage,
     brain: Brain,
     moltbook: MoltbookClient,
-    bot: Bot,
-    owner_id: int,
     feed: list,
     params: dict,
     memory: MemoryManager | None = None,
@@ -572,10 +548,10 @@ async def _do_comment(
             metadata={"post_id": post_id, "author": target.author},
         )
 
-    try:
-        await bot.send_message(owner_id, f"Commented on: {target.title}")
-    except Exception:
-        logger.exception("Failed to notify owner about new comment")
+    await storage.emit_event("comment_created", {
+        "post_title": target.title, "post_author": target.author,
+        "comment_text": text[:300],
+    })
 
 
 async def _consolidation_tick(

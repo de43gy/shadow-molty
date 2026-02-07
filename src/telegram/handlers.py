@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
 
-import anthropic
 import httpx
-import yaml
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from src.config import settings
+from src.core.persona import generate_identity
 from src.moltbook.client import MoltbookClient, NameTakenError
-from src.storage.memory import Storage
+from src.storage.db import Storage
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +27,7 @@ HELP_TEXT = (
     "/dm_reply <id> <message> — reply to a DM\n"
     "/reflect — trigger a reflection cycle\n"
     "/heartbeat — trigger a manual heartbeat\n"
+    "/channel — channel posting settings\n"
     "/pause — pause autonomous behavior\n"
     "/resume — resume autonomous behavior"
 )
@@ -50,45 +47,13 @@ def register_handlers(router: Router) -> None:
     router.message.register(cmd_dm_reply, Command("dm_reply"))
     router.message.register(cmd_reflect, Command("reflect"))
     router.message.register(cmd_heartbeat, Command("heartbeat"))
+    router.message.register(cmd_channel, Command("channel"))
     router.message.register(cmd_pause, Command("pause"))
     router.message.register(cmd_resume, Command("resume"))
 
 
 async def cmd_start(message: Message) -> None:
     await message.answer(f"Shadow-Molty control panel.\n\n{HELP_TEXT}")
-
-
-async def _generate_identity(persona: dict, taken_names: list[str] | None = None) -> dict:
-    """Ask LLM to generate agent name and description based on persona."""
-    interests = ", ".join(persona.get("interests", []))
-    style = persona.get("style", {})
-    tone = style.get("tone", "neutral")
-
-    taken_note = ""
-    if taken_names:
-        taken_note = f"\n\nThese names are already taken, pick something different: {', '.join(taken_names)}"
-
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-    resp = await client.messages.create(
-        model=settings.llm_model,
-        max_tokens=256,
-        messages=[{
-            "role": "user",
-            "content": (
-                "You are creating an identity for an AI agent on Moltbook (a social network for AI agents).\n\n"
-                f"Interests: {interests}\n"
-                f"Personality: {tone}\n"
-                f"{taken_note}\n\n"
-                "Generate a unique agent name (one word, CamelCase, creative, memorable) "
-                "and a short description (1-2 sentences).\n\n"
-                "Return ONLY a JSON object: {\"name\": \"...\", \"description\": \"...\"}"
-            ),
-        }],
-    )
-    text = resp.content[0].text.strip()
-    start = text.find("{")
-    end = text.rfind("}") + 1
-    return json.loads(text[start:end])
 
 
 async def cmd_register(message: Message, storage: Storage, moltbook: MoltbookClient) -> None:
@@ -98,11 +63,8 @@ async def cmd_register(message: Message, storage: Storage, moltbook: MoltbookCli
             await message.answer("Already registered.")
             return
 
-        persona_path = Path("config/persona.yaml")
-        persona = yaml.safe_load(persona_path.read_text(encoding="utf-8"))
-
         await message.answer("Generating identity...")
-        identity = await _generate_identity(persona)
+        identity = await generate_identity()
         name = identity["name"]
         description = identity["description"]
 
@@ -116,7 +78,7 @@ async def cmd_register(message: Message, storage: Storage, moltbook: MoltbookCli
             except NameTakenError:
                 taken_names.append(name)
                 if attempt + 1 < max_attempts:
-                    identity = await _generate_identity(persona, taken_names)
+                    identity = await generate_identity(taken_names)
                     name = identity["name"]
                     description = identity["description"]
                 else:
@@ -347,6 +309,55 @@ async def cmd_heartbeat(message: Message, storage: Storage) -> None:
         await message.answer(f"Manual heartbeat queued as task #{task_id}")
     except Exception as e:
         logger.exception("cmd_heartbeat failed")
+        await message.answer(f"Error: {e}")
+
+
+_CHANNEL_SETTINGS = ("posts", "comments", "replies", "dms", "reflection", "alerts", "daily_summary")
+
+
+async def cmd_channel(message: Message, storage: Storage) -> None:
+    try:
+        raw = (message.text or "").removeprefix("/channel").strip()
+        args = raw.split()
+
+        channel_id = await storage.get_state("channel_id")
+
+        if not args:
+            # Show status
+            if not channel_id:
+                await message.answer("No channel configured. Add bot as admin to a channel to auto-detect.")
+                return
+            active = await storage.get_state("channel_active")
+            lines = [f"Channel: {channel_id}", f"Active: {'yes' if active != '0' else 'no (paused)'}"]
+            for key in _CHANNEL_SETTINGS:
+                val = await storage.get_state(f"channel_{key}")
+                lines.append(f"  {key}: {'on' if val != '0' else 'off'}")
+            lines.append("\nCommands: /channel pause | resume | toggle <setting>")
+            await message.answer("\n".join(lines))
+            return
+
+        cmd = args[0].lower()
+
+        if cmd == "pause":
+            await storage.set_state("channel_active", "0")
+            await message.answer("Channel posting paused.")
+        elif cmd == "resume":
+            await storage.set_state("channel_active", "1")
+            await message.answer("Channel posting resumed.")
+        elif cmd == "toggle" and len(args) >= 2:
+            key = args[1].lower()
+            if key not in _CHANNEL_SETTINGS:
+                await message.answer(f"Unknown setting. Available: {', '.join(_CHANNEL_SETTINGS)}")
+                return
+            current = await storage.get_state(f"channel_{key}")
+            new_val = "0" if current != "0" else "1"
+            await storage.set_state(f"channel_{key}", new_val)
+            await message.answer(f"channel_{key}: {'on' if new_val == '1' else 'off'}")
+        else:
+            await message.answer("Usage: /channel [pause|resume|toggle <setting>]")
+
+    except Exception as e:
+        logger.exception("cmd_channel failed")
         await message.answer(f"Error: {e}")
 
 

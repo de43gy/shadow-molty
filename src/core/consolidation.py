@@ -5,9 +5,9 @@ import logging
 
 import anthropic
 
-from src.agent.memory import MemoryManager
+from src.core.memory import MemoryManager
 from src.config import settings
-from src.storage.memory import Storage
+from src.storage.db import Storage
 
 logger = logging.getLogger(__name__)
 

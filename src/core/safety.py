@@ -5,7 +5,7 @@ import re
 
 import anthropic
 
-from src.storage.memory import Storage
+from src.storage.db import Storage
 
 logger = logging.getLogger(__name__)
 

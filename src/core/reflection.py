@@ -6,10 +6,10 @@ import logging
 import anthropic
 import yaml
 
-from src.agent.memory import MemoryManager
-from src.agent.persona import DEFAULT_STRATEGY
+from src.core.memory import MemoryManager
+from src.core.persona import DEFAULT_STRATEGY
 from src.config import settings
-from src.storage.memory import Storage
+from src.storage.db import Storage
 
 logger = logging.getLogger(__name__)
 

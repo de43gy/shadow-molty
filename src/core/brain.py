@@ -6,8 +6,8 @@ import logging
 import anthropic
 
 from src.config import settings
-from src.agent.persona import load_identity, build_system_prompt
-from src.agent.safety import sanitize_content, spotlight_content
+from src.core.persona import load_identity, build_system_prompt
+from src.core.safety import sanitize_content, spotlight_content
 from src.moltbook.models import Post, Comment
 
 logger = logging.getLogger(__name__)
