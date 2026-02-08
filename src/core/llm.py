@@ -112,7 +112,7 @@ def create_llm_client() -> FallbackLLMClient:
                 api_key=settings.google_api_key,
                 base_url=settings.google_base_url,
             ),
-            model=settings.google_model,
+            model=settings.google_model or "gemini-2.0-flash",
         ))
 
     if settings.openrouter_api_key:

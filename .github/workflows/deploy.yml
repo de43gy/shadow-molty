@@ -54,13 +54,13 @@ jobs:
             TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
             TELEGRAM_OWNER_ID=$TELEGRAM_OWNER_ID
             GOOGLE_API_KEY=$GOOGLE_API_KEY
-            GOOGLE_MODEL=$GOOGLE_MODEL
             OPENROUTER_API_KEY=$OPENROUTER_API_KEY
-            OPENROUTER_MODEL=$OPENROUTER_MODEL
             LLM_API_KEY=$LLM_API_KEY
             LLM_MODEL=$LLM_MODEL
             LLM_BASE_URL=$LLM_BASE_URL
             EOF
+            [ -n "$GOOGLE_MODEL" ] && echo "GOOGLE_MODEL=$GOOGLE_MODEL" >> .env
+            [ -n "$OPENROUTER_MODEL" ] && echo "OPENROUTER_MODEL=$OPENROUTER_MODEL" >> .env
             cat > docker-compose.yml <<EOF
             services:
               agent:
