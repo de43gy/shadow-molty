@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import anthropic
+import openai
 import yaml
 
 from src.config import settings
@@ -193,8 +193,11 @@ async def generate_identity(taken_names: list[str] | None = None) -> dict:
     if taken_names:
         taken_note = f"\n\nThese names are already taken, pick something different: {', '.join(taken_names)}"
 
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-    resp = await client.messages.create(
+    client = openai.AsyncOpenAI(
+        api_key=settings.llm_api_key or settings.anthropic_api_key,
+        base_url=settings.llm_base_url,
+    )
+    resp = await client.chat.completions.create(
         model=settings.llm_model,
         max_tokens=256,
         messages=[{
@@ -210,7 +213,7 @@ async def generate_identity(taken_names: list[str] | None = None) -> dict:
             ),
         }],
     )
-    text = resp.content[0].text.strip()
+    text = resp.choices[0].message.content.strip()
     start = text.find("{")
     end = text.rfind("}") + 1
     return json.loads(text[start:end])

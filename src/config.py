@@ -8,9 +8,14 @@ class Settings(BaseSettings):
     moltbook_api_key: str = Field(default="", alias="MOLTBOOK_API_KEY")
     telegram_bot_token: str = Field(alias="TELEGRAM_BOT_TOKEN")
     telegram_owner_id: int = Field(alias="TELEGRAM_OWNER_ID")
-    anthropic_api_key: str = Field(alias="ANTHROPIC_API_KEY")
+    llm_api_key: str = Field(default="", alias="LLM_API_KEY")
+    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
 
-    llm_model: str = Field(default="claude-sonnet-4-5-20250929", alias="LLM_MODEL")
+    llm_base_url: str = Field(
+        default="https://generativelanguage.googleapis.com/v1beta/openai/",
+        alias="LLM_BASE_URL",
+    )
+    llm_model: str = Field(default="gemini-2.0-flash", alias="LLM_MODEL")
 
     moltbook_base_url: str = "https://www.moltbook.com/api/v1"
 

@@ -5,7 +5,7 @@ import math
 import re
 from datetime import datetime, timezone
 
-import anthropic
+import openai
 
 from src.storage.db import Storage
 
@@ -20,7 +20,7 @@ _CORE_BLOCKS = {
 
 
 class MemoryManager:
-    def __init__(self, storage: Storage, client: anthropic.AsyncAnthropic, model: str):
+    def __init__(self, storage: Storage, client: openai.AsyncOpenAI, model: str):
         self._storage = storage
         self._client = client
         self._model = model
@@ -92,7 +92,7 @@ class MemoryManager:
     async def score_importance(self, content: str) -> float:
         """Ask LLM to rate episode importance 1-10."""
         try:
-            resp = await self._client.messages.create(
+            resp = await self._client.chat.completions.create(
                 model=self._model,
                 max_tokens=8,
                 messages=[{
@@ -104,7 +104,7 @@ class MemoryManager:
                     ),
                 }],
             )
-            text = resp.content[0].text.strip()
+            text = resp.choices[0].message.content.strip()
             match = re.search(r"(\d+(?:\.\d+)?)", text)
             return min(10.0, max(1.0, float(match.group(1)))) if match else 5.0
         except Exception:

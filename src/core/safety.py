@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 
-import anthropic
+import openai
 
 from src.storage.db import Storage
 
@@ -57,7 +57,7 @@ async def validate_action(
     action: dict,
     goals: dict,
     constitution: dict,
-    client: anthropic.AsyncAnthropic,
+    client: openai.AsyncOpenAI,
     model: str,
 ) -> tuple[bool, str]:
     """Task Shield: verify an action aligns with goals and constitution."""
@@ -80,12 +80,12 @@ async def validate_action(
         "Reply ONLY with a JSON object: {\"safe\": true/false, \"reason\": \"...\"}"
     )
     try:
-        resp = await client.messages.create(
+        resp = await client.chat.completions.create(
             model=model,
             max_tokens=128,
             messages=[{"role": "user", "content": prompt}],
         )
-        text = resp.content[0].text.strip()
+        text = resp.choices[0].message.content.strip()
         start = text.find("{")
         end = text.rfind("}") + 1
         if start != -1 and end > start:

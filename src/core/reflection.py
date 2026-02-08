@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 
-import anthropic
+import openai
 import yaml
 
 from src.core.memory import MemoryManager
@@ -19,7 +19,7 @@ class ReflectionEngine:
         self,
         storage: Storage,
         memory: MemoryManager,
-        client: anthropic.AsyncAnthropic,
+        client: openai.AsyncOpenAI,
         model: str,
         constitution: dict,
     ):
@@ -113,12 +113,12 @@ class ReflectionEngine:
             "Be specific and honest. Write 3-5 paragraphs."
         )
         try:
-            resp = await self._client.messages.create(
+            resp = await self._client.chat.completions.create(
                 model=self._model,
                 max_tokens=1024,
                 messages=[{"role": "user", "content": prompt}],
             )
-            reflection_text = resp.content[0].text
+            reflection_text = resp.choices[0].message.content
 
             await self._memory.remember(
                 "reflection_thought", reflection_text[:500],
@@ -144,12 +144,12 @@ class ReflectionEngine:
             "Return [] if no changes needed."
         )
         try:
-            resp = await self._client.messages.create(
+            resp = await self._client.chat.completions.create(
                 model=self._model,
                 max_tokens=1024,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = resp.content[0].text.strip()
+            text = resp.choices[0].message.content.strip()
             start = text.find("[")
             end = text.rfind("]") + 1
             if start != -1 and end > start:
@@ -179,12 +179,12 @@ class ReflectionEngine:
             "[{\"field\": \"...\", \"new_value\": \"...\", \"reason\": \"...\", \"approved\": true/false}]"
         )
         try:
-            resp = await self._client.messages.create(
+            resp = await self._client.chat.completions.create(
                 model=self._model,
                 max_tokens=1024,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = resp.content[0].text.strip()
+            text = resp.choices[0].message.content.strip()
             start = text.find("[")
             end = text.rfind("]") + 1
             if start != -1 and end > start:

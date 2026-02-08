@@ -46,15 +46,16 @@ jobs:
           host: ${{ vars.VPS_HOST }}
           username: ${{ vars.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: DEPLOY_DIR,IMAGE,GH_USER,GH_TOKEN,TELEGRAM_BOT_TOKEN,TELEGRAM_OWNER_ID,ANTHROPIC_API_KEY,LLM_MODEL
+          envs: DEPLOY_DIR,IMAGE,GH_USER,GH_TOKEN,TELEGRAM_BOT_TOKEN,TELEGRAM_OWNER_ID,LLM_API_KEY,LLM_MODEL,LLM_BASE_URL
           script: |
             echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_USER" --password-stdin
             mkdir -p $DEPLOY_DIR && cd $DEPLOY_DIR
             cat > .env <<EOF
             TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
             TELEGRAM_OWNER_ID=$TELEGRAM_OWNER_ID
-            ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
+            LLM_API_KEY=$LLM_API_KEY
             LLM_MODEL=$LLM_MODEL
+            LLM_BASE_URL=$LLM_BASE_URL
             EOF
             cat > docker-compose.yml <<EOF
             services:
@@ -75,5 +76,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_OWNER_ID: ${{ vars.TELEGRAM_OWNER_ID }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}

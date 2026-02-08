@@ -30,7 +30,7 @@ async def run_consumer(
     storage: Storage,
     bot: Bot,
     owner_id: int,
-    anthropic_client,
+    llm_client,
     model: str,
     poll_interval: float = 2,
 ) -> None:
@@ -46,7 +46,7 @@ async def run_consumer(
                         await bot.send_message(owner_id, msg)
                     except Exception:
                         logger.exception("Failed to send event to owner")
-                    await _maybe_send_to_channel(event, msg, storage, bot, anthropic_client, model)
+                    await _maybe_send_to_channel(event, msg, storage, bot, llm_client, model)
             except Exception:
                 logger.exception("Event consumer tick failed")
             await asyncio.sleep(poll_interval)
@@ -143,7 +143,7 @@ def format_event(event: dict) -> str:
 async def _maybe_send_to_channel(
     event: dict, formatted_msg: str,
     storage: Storage, bot: Bot,
-    anthropic_client, model: str,
+    llm_client, model: str,
 ) -> None:
     """Translate and send to channel if configured and enabled."""
     channel_id = await storage.get_state("channel_id")
@@ -166,15 +166,15 @@ async def _maybe_send_to_channel(
         if event["type"] == "daily_newspaper":
             await bot.send_message(int(channel_id), formatted_msg)
         else:
-            translated = await _translate(formatted_msg, anthropic_client, model)
+            translated = await _translate(formatted_msg, llm_client, model)
             await bot.send_message(int(channel_id), translated)
     except Exception:
         logger.exception("Failed to send event to channel")
 
 
 async def _translate(text: str, client, model: str) -> str:
-    """Translate English text to Russian via Claude API."""
-    resp = await client.messages.create(
+    """Translate English text to Russian via LLM API."""
+    resp = await client.chat.completions.create(
         model=model,
         max_tokens=1024,
         messages=[{
@@ -186,4 +186,4 @@ async def _translate(text: str, client, model: str) -> str:
             ),
         }],
     )
-    return resp.content[0].text.strip()
+    return resp.choices[0].message.content.strip()

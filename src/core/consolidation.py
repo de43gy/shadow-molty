@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 
-import anthropic
+import openai
 
 from src.core.memory import MemoryManager
 from src.config import settings
@@ -17,7 +17,7 @@ class ConsolidationEngine:
         self,
         storage: Storage,
         memory: MemoryManager,
-        client: anthropic.AsyncAnthropic,
+        client: openai.AsyncOpenAI,
         model: str,
     ):
         self._storage = storage
@@ -58,7 +58,7 @@ class ConsolidationEngine:
                 f"- [{e['type']}] {e['content'][:200]}" for e in batch
             )
             try:
-                resp = await self._client.messages.create(
+                resp = await self._client.chat.completions.create(
                     model=self._model,
                     max_tokens=256,
                     messages=[{
@@ -69,7 +69,7 @@ class ConsolidationEngine:
                         ),
                     }],
                 )
-                summary = resp.content[0].text.strip()
+                summary = resp.choices[0].message.content.strip()
                 ids = [e["id"] for e in batch]
                 await self._storage.delete_episodes(ids)
                 await self._storage.add_episode(
@@ -112,12 +112,12 @@ class ConsolidationEngine:
         )
 
         try:
-            resp = await self._client.messages.create(
+            resp = await self._client.chat.completions.create(
                 model=self._model,
                 max_tokens=512,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = resp.content[0].text.strip()
+            text = resp.choices[0].message.content.strip()
             start = text.find("[")
             end = text.rfind("]") + 1
             if start == -1 or end <= start:
@@ -171,12 +171,12 @@ class ConsolidationEngine:
                 f"Return ONLY the updated content, nothing else."
             )
             try:
-                resp = await self._client.messages.create(
+                resp = await self._client.chat.completions.create(
                     model=self._model,
                     max_tokens=512,
                     messages=[{"role": "user", "content": prompt}],
                 )
-                new_content = resp.content[0].text.strip()
+                new_content = resp.choices[0].message.content.strip()
                 if new_content and new_content != current:
                     await self._storage.audit("core_memory_update", {
                         "block": name,
@@ -210,12 +210,12 @@ class ConsolidationEngine:
             "Return [] if no contradictions found."
         )
         try:
-            resp = await self._client.messages.create(
+            resp = await self._client.chat.completions.create(
                 model=self._model,
                 max_tokens=128,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = resp.content[0].text.strip()
+            text = resp.choices[0].message.content.strip()
             start = text.find("[")
             end = text.rfind("]") + 1
             if start == -1 or end <= start:

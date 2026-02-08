@@ -756,12 +756,12 @@ async def _daily_newspaper(
             + activity_data
         )
 
-        resp = await client.messages.create(
+        resp = await client.chat.completions.create(
             model=model,
             max_tokens=1024,
             messages=[{"role": "user", "content": prompt}],
         )
-        newspaper_text = resp.content[0].text.strip()
+        newspaper_text = resp.choices[0].message.content.strip()
 
         await storage.emit_event("daily_newspaper", {"text": newspaper_text})
         logger.info("Daily newspaper generated (%d chars)", len(newspaper_text))

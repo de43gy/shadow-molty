@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 
-import anthropic
+import openai
 
 from src.config import settings
 from src.core.persona import load_identity, build_system_prompt
@@ -19,14 +19,17 @@ class Brain:
         name: str = "",
         description: str = "",
         strategy: dict | None = None,
-        client: anthropic.AsyncAnthropic | None = None,
+        client: openai.AsyncOpenAI | None = None,
         memory=None,
     ):
         self._strategy = strategy
         self._identity = load_identity(name=name, description=description, strategy=strategy)
         self._name = name
         self._description = description
-        self._client = client or anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self._client = client or openai.AsyncOpenAI(
+            api_key=settings.llm_api_key or settings.anthropic_api_key,
+            base_url=settings.llm_base_url,
+        )
         self._model = settings.llm_model
         self._system_prompt = build_system_prompt(identity=self._identity)
         self._memory = memory  # MemoryManager, set later if needed
@@ -57,13 +60,15 @@ class Brain:
             if memory_context:
                 system += f"\n\n<memory>\n{memory_context}\n</memory>"
 
-        response = await self._client.messages.create(
+        response = await self._client.chat.completions.create(
             model=self._model,
             max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user_prompt}],
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_prompt},
+            ],
         )
-        return response.content[0].text
+        return response.choices[0].message.content
 
     # ------------------------------------------------------------------
     # Public methods
