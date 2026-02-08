@@ -608,6 +608,21 @@ class Storage:
         )
         unreplied_row = await unreplied_cur.fetchone()
 
+        last_post_cur = await self.db.execute(
+            "SELECT created_at FROM own_posts ORDER BY created_at DESC LIMIT 1"
+        )
+        last_post_row = await last_post_cur.fetchone()
+        last_post_at = last_post_row["created_at"] if last_post_row else None
+
+        hours_since_last_post = None
+        if last_post_at:
+            try:
+                last_dt = datetime.fromisoformat(last_post_at)
+                delta = datetime.now(timezone.utc) - last_dt
+                hours_since_last_post = round(delta.total_seconds() / 3600, 1)
+            except (ValueError, TypeError):
+                pass
+
         paused = await self.get_state("paused")
 
         return {
@@ -617,5 +632,7 @@ class Storage:
             "pending_tasks": pending_row["cnt"],
             "watched_agents": watched_row["cnt"],
             "unreplied_comments": unreplied_row["cnt"],
+            "last_post_at": last_post_at,
+            "hours_since_last_post": hours_since_last_post,
             "paused": paused == "1" if paused else False,
         }

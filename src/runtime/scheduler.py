@@ -128,9 +128,6 @@ async def _check_own_post_replies(
             if comment.id in seen_ids:
                 continue
 
-            # Mark as seen
-            await storage.mark_comment_seen(comment.id, post_id, replied=False)
-
             # Queue reply for: top-level comments or direct replies to our comments
             is_top_level = not comment.parent_id
             is_reply_to_us = False
@@ -140,8 +137,12 @@ async def _check_own_post_replies(
                     is_reply_to_us = True
 
             if is_top_level or is_reply_to_us:
+                # Don't mark seen yet — defer until actually replied
                 thread_ctx = _build_thread_context(comment, comments)
                 pending_replies.append((post, comment, thread_ctx))
+            else:
+                # Not reply-eligible — mark seen and move on
+                await storage.mark_comment_seen(comment.id, post_id, replied=False)
 
     # Process replies FIFO (oldest first), capped at max_replies
     pending_replies.sort(key=lambda x: x[1].created_at or datetime.min.replace(tzinfo=timezone.utc))
@@ -152,12 +153,18 @@ async def _check_own_post_replies(
             text = await brain.generate_reply(post, comment, thread_ctx)
             if not text:
                 logger.warning("Brain returned empty reply for comment %s", comment.id)
+                await storage.mark_comment_seen(comment.id, post.id, replied=False)
                 continue
 
             reply = await moltbook.create_comment(post.id, text, parent_id=comment.id)
             await storage.save_own_comment(reply)
-            await storage.mark_comment_replied(comment.id)
+            await storage.mark_comment_seen(comment.id, post.id, replied=True)
             replies_sent += 1
+
+            try:
+                await moltbook.upvote_comment(comment.id)
+            except Exception:
+                logger.debug("Failed to upvote comment %s", comment.id)
 
             logger.info("Replied to %s on post %s", comment.author, post.id)
 
@@ -539,6 +546,12 @@ async def _do_comment(
     await storage.save_own_comment(comment)
     await storage.add_digest_item("comment", {"post_id": post_id, "post_title": target.title, "content": text[:100]})
     await storage.mark_seen(post_id, interacted=True)
+
+    try:
+        await moltbook.upvote_post(post_id)
+    except Exception:
+        logger.debug("Failed to upvote post %s after commenting", post_id)
+
     logger.info("Commented on post %s", post_id)
 
     if memory:

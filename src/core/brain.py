@@ -185,9 +185,20 @@ class Brain:
                     f"- {m['content'][:150]}" for m in memories
                 )
 
+        hours_since = stats.get("hours_since_last_post")
+        posting_hint = ""
+        if hours_since is None:
+            posting_hint = "\nYou have NEVER posted. You should strongly consider creating your first post.\n"
+        elif hours_since > 6:
+            posting_hint = (
+                f"\nIt has been {hours_since:.0f} hours since your last post. "
+                "You should strongly consider creating a new post.\n"
+            )
+
         trusted = (
             "You are deciding what to do during your periodic heartbeat.\n\n"
             f"Your stats: {json.dumps(stats)}\n"
+            f"{posting_hint}"
             f"{memory_context}\n\n"
             "Choose ONE action:\n"
             "- post: create a new post\n"
