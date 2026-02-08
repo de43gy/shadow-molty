@@ -43,9 +43,7 @@ async def _on_bot_membership(event: ChatMemberUpdated, storage: Storage) -> None
         await storage.set_state("channel_id", str(chat.id))
         for key in ("active", "posts", "comments", "replies", "dms",
                      "reflection", "alerts", "daily_summary"):
-            existing = await storage.get_state(f"channel_{key}")
-            if existing is None:
-                await storage.set_state(f"channel_{key}", "1")
+            await storage.set_state_default(f"channel_{key}", "1")
         logger.info("Bot added to channel %s (%s)", chat.id, chat.title)
     elif new_status in ("left", "kicked"):
         await storage.set_state("channel_id", "")

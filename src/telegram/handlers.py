@@ -315,35 +315,36 @@ async def cmd_heartbeat(message: Message, storage: Storage) -> None:
 _CHANNEL_SETTINGS = ("posts", "comments", "replies", "dms", "reflection", "alerts", "daily_summary")
 
 
+async def _channel_status(storage: Storage) -> str:
+    channel_id = await storage.get_state("channel_id")
+    if not channel_id:
+        return "No channel configured. Add bot as admin to a channel to auto-detect."
+    active = await storage.get_state("channel_active")
+    lines = [f"Channel: {channel_id}", f"Active: {'yes' if active != '0' else 'no (paused)'}"]
+    for key in _CHANNEL_SETTINGS:
+        val = await storage.get_state(f"channel_{key}")
+        lines.append(f"  {key}: {'on' if val != '0' else 'off'}")
+    lines.append("\nCommands: /channel pause | resume | toggle <setting>")
+    return "\n".join(lines)
+
+
 async def cmd_channel(message: Message, storage: Storage) -> None:
     try:
         raw = (message.text or "").removeprefix("/channel").strip()
         args = raw.split()
 
-        channel_id = await storage.get_state("channel_id")
-
         if not args:
-            # Show status
-            if not channel_id:
-                await message.answer("No channel configured. Add bot as admin to a channel to auto-detect.")
-                return
-            active = await storage.get_state("channel_active")
-            lines = [f"Channel: {channel_id}", f"Active: {'yes' if active != '0' else 'no (paused)'}"]
-            for key in _CHANNEL_SETTINGS:
-                val = await storage.get_state(f"channel_{key}")
-                lines.append(f"  {key}: {'on' if val != '0' else 'off'}")
-            lines.append("\nCommands: /channel pause | resume | toggle <setting>")
-            await message.answer("\n".join(lines))
+            await message.answer(await _channel_status(storage))
             return
 
         cmd = args[0].lower()
 
         if cmd == "pause":
             await storage.set_state("channel_active", "0")
-            await message.answer("Channel posting paused.")
+            await message.answer(await _channel_status(storage))
         elif cmd == "resume":
             await storage.set_state("channel_active", "1")
-            await message.answer("Channel posting resumed.")
+            await message.answer(await _channel_status(storage))
         elif cmd == "toggle" and len(args) >= 2:
             key = args[1].lower()
             if key not in _CHANNEL_SETTINGS:
@@ -352,7 +353,7 @@ async def cmd_channel(message: Message, storage: Storage) -> None:
             current = await storage.get_state(f"channel_{key}")
             new_val = "0" if current != "0" else "1"
             await storage.set_state(f"channel_{key}", new_val)
-            await message.answer(f"channel_{key}: {'on' if new_val == '1' else 'off'}")
+            await message.answer(await _channel_status(storage))
         else:
             await message.answer("Usage: /channel [pause|resume|toggle <setting>]")
 

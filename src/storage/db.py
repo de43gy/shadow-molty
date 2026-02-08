@@ -172,6 +172,14 @@ class Storage:
         )
         await self.db.commit()
 
+    async def set_state_default(self, key: str, value: str) -> None:
+        """Set state only if key doesn't exist yet (atomic, no race)."""
+        await self.db.execute(
+            "INSERT OR IGNORE INTO state (key, value, updated_at) VALUES (?, ?, ?)",
+            (key, value, _now()),
+        )
+        await self.db.commit()
+
     # ── Own posts / comments ──────────────────────────────────
 
     async def save_own_post(self, post) -> None:
