@@ -75,6 +75,8 @@ async def main() -> None:
         memory=memory,
         reflection=reflection,
         consolidation_engine=consolidation,
+        client=client,
+        model=settings.llm_model,
     )
     if moltbook.registered:
         scheduler.start()

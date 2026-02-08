@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     heartbeat_min_sec: int = 1800  # 30 min
     heartbeat_max_sec: int = 3600  # 60 min
 
+    # Daily newspaper
+    daily_newspaper_hour: int = 21  # UTC hour to send daily newspaper
+
     # Reflection & consolidation
     reflection_every_n_heartbeats: int = 10
     consolidation_interval_min: int = 15

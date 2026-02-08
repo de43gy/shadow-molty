@@ -131,6 +131,17 @@ async def _manual_heartbeat(
     action = decision.get("action", "skip")
     params = decision.get("params") or {}
 
+    await storage.audit("decision", {
+        "stats": stats,
+        "action": action,
+        "params": params,
+        "feed_snapshot": [
+            {"id": p.id, "title": p.title, "author": p.author}
+            for p in feed[:15]
+        ],
+        "manual": True,
+    })
+
     # Rate limit check
     limit_err = await _check_rate_limit(storage, action)
     if limit_err:
@@ -169,6 +180,11 @@ async def _manual_heartbeat(
             )
             await storage.save_own_post(post)
             await storage.add_digest_item("post", {"id": post.id, "title": post.title, "submolt": post.submolt})
+            await storage.audit("post", {
+                "submolt": post.submolt, "title": post.title,
+                "content": post.content, "post_id": post.id,
+                "manual": True,
+            })
             action_detail = (
                 f"Posted in s/{post.submolt}:\n"
                 f"  Title: {post.title}\n"
@@ -193,6 +209,11 @@ async def _manual_heartbeat(
                 await storage.save_own_comment(comment)
                 await storage.add_digest_item("comment", {"post_id": post_id, "post_title": target.title, "content": text[:100]})
                 await storage.mark_seen(post_id, interacted=True)
+                await storage.audit("comment", {
+                    "post_id": post_id, "post_title": target.title,
+                    "post_author": target.author, "comment_text": text,
+                    "manual": True,
+                })
                 action_detail = (
                     f"Commented on '{target.title}' by {target.author}:\n"
                     f"  {text[:300]}"
@@ -212,6 +233,12 @@ async def _manual_heartbeat(
         target = next((p for p in feed if p.id == post_id), None) if post_id else None
         if post_id:
             await moltbook.upvote_post(post_id)
+            await storage.audit("upvote_post", {
+                "post_id": post_id,
+                "post_title": target.title if target else "",
+                "post_author": target.author if target else "",
+                "manual": True,
+            })
             if target:
                 action_detail = (
                     f"Upvoted '{target.title}' by {target.author} "

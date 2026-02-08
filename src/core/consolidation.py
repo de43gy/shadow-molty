@@ -178,6 +178,11 @@ class ConsolidationEngine:
                 )
                 new_content = resp.content[0].text.strip()
                 if new_content and new_content != current:
+                    await self._storage.audit("core_memory_update", {
+                        "block": name,
+                        "old_content": current,
+                        "new_content": new_content,
+                    })
                     await self._memory.update_core_block(name, new_content)
                     updated_blocks.append(name)
             except Exception:

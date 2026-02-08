@@ -22,6 +22,7 @@ EVENT_SETTING_MAP: dict[str, str] = {
     "dm_needs_human": "dms",
     "reflection_done": "reflection",
     "stability_alert": "alerts",
+    "daily_newspaper": "daily_summary",
 }
 
 
@@ -133,6 +134,9 @@ def format_event(event: dict) -> str:
     if etype == "heartbeat_skip":
         return f"Heartbeat skipped ({data.get('reason', '?')})"
 
+    if etype == "daily_newspaper":
+        return data.get("text", "")
+
     return f"[{etype}] {json.dumps(data)[:300]}"
 
 
@@ -159,8 +163,11 @@ async def _maybe_send_to_channel(
         return
 
     try:
-        translated = await _translate(formatted_msg, anthropic_client, model)
-        await bot.send_message(int(channel_id), translated)
+        if event["type"] == "daily_newspaper":
+            await bot.send_message(int(channel_id), formatted_msg)
+        else:
+            translated = await _translate(formatted_msg, anthropic_client, model)
+            await bot.send_message(int(channel_id), translated)
     except Exception:
         logger.exception("Failed to send event to channel")
 

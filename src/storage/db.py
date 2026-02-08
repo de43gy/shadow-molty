@@ -116,6 +116,13 @@ CREATE TABLE IF NOT EXISTS agent_events (
     consumed INTEGER DEFAULT 0,
     created_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    data TEXT NOT NULL,
+    created_at TEXT
+);
 """
 
 
@@ -581,6 +588,51 @@ class Storage:
         )
         await self.db.commit()
         return events
+
+    # ── Audit log ─────────────────────────────────────────────
+
+    async def audit(self, type: str, data: dict) -> None:
+        await self.db.execute(
+            "INSERT INTO audit_log (type, data, created_at) VALUES (?, ?, ?)",
+            (type, json.dumps(data, default=str), _now()),
+        )
+        await self.db.commit()
+
+    async def get_audit_since(self, hours: int = 24) -> list[dict]:
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        cur = await self.db.execute(
+            "SELECT * FROM audit_log WHERE created_at >= ? ORDER BY id",
+            (cutoff,),
+        )
+        rows = await cur.fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["data"] = json.loads(d["data"]) if d["data"] else {}
+            result.append(d)
+        return result
+
+    async def get_audit_log(
+        self, type: str | None = None, limit: int = 50, offset: int = 0
+    ) -> list[dict]:
+        if type:
+            cur = await self.db.execute(
+                "SELECT * FROM audit_log WHERE type = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+                (type, limit, offset),
+            )
+        else:
+            cur = await self.db.execute(
+                "SELECT * FROM audit_log ORDER BY id DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            )
+        rows = await cur.fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["data"] = json.loads(d["data"]) if d["data"] else {}
+            result.append(d)
+        return result
 
     # ── Stats ─────────────────────────────────────────────────
 

@@ -6,6 +6,7 @@ import random
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.core.brain import Brain
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 HEARTBEAT_JOB_ID = "heartbeat"
 CONSOLIDATION_JOB_ID = "consolidation"
+NEWSPAPER_JOB_ID = "daily_newspaper"
 
 
 def create_scheduler(
@@ -30,6 +32,8 @@ def create_scheduler(
     memory: MemoryManager | None = None,
     reflection: ReflectionEngine | None = None,
     consolidation_engine=None,
+    client=None,
+    model: str = "",
 ) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
 
@@ -61,6 +65,20 @@ def create_scheduler(
             },
         )
         logger.info("Consolidation job scheduled (every %d min)", settings.consolidation_interval_min)
+
+    # Daily newspaper job
+    if client:
+        scheduler.add_job(
+            _daily_newspaper,
+            trigger=CronTrigger(hour=settings.daily_newspaper_hour),
+            id=NEWSPAPER_JOB_ID,
+            kwargs={
+                "storage": storage,
+                "client": client,
+                "model": model,
+            },
+        )
+        logger.info("Daily newspaper scheduled at %02d:00 UTC", settings.daily_newspaper_hour)
 
     return scheduler
 
@@ -161,8 +179,18 @@ async def _check_own_post_replies(
             await storage.mark_comment_seen(comment.id, post.id, replied=True)
             replies_sent += 1
 
+            await storage.audit("reply", {
+                "post_id": post.id, "post_title": post.title,
+                "comment_author": comment.author, "comment_text": comment.content,
+                "reply_text": text, "parent_id": comment.id,
+            })
+
             try:
                 await moltbook.upvote_comment(comment.id)
+                await storage.audit("upvote_comment", {
+                    "comment_id": comment.id, "post_id": post.id,
+                    "comment_author": comment.author,
+                })
             except Exception:
                 logger.debug("Failed to upvote comment %s", comment.id)
 
@@ -226,6 +254,9 @@ async def _check_dms(
                 await moltbook.dm_approve(conv_id)
                 await storage.upsert_dm_conversation(conv_id, from_name)
                 logger.info("Auto-approved DM request from %s", from_name)
+                await storage.audit("dm_approved", {
+                    "conversation_id": conv_id, "other_agent": from_name,
+                })
                 await storage.emit_event("dm_approved", {"other_agent": from_name})
             except Exception:
                 logger.exception("Failed to approve DM from %s", from_name)
@@ -315,6 +346,10 @@ async def _check_dms(
 
             if result.get("needs_human_input"):
                 await storage.set_dm_needs_human(conv_id, True)
+                await storage.audit("dm_escalated", {
+                    "conversation_id": conv_id, "other_agent": other_name,
+                    "reason": "needs_human_input",
+                })
                 await storage.emit_event("dm_needs_human", {
                     "other_agent": other_name, "conversation_id": conv_id,
                     "last_message": incoming[-1].get("content", "")[:200],
@@ -323,6 +358,10 @@ async def _check_dms(
             else:
                 await moltbook.dm_send(conv_id, result["content"])
                 logger.info("Sent DM reply to %s", other_name)
+                await storage.audit("dm_sent", {
+                    "conversation_id": conv_id, "other_agent": other_name,
+                    "message": result["content"],
+                })
                 await storage.emit_event("dm_replied", {
                     "other_agent": other_name,
                     "reply_text": result["content"][:300],
@@ -401,6 +440,16 @@ async def _heartbeat(
         action = decision.get("action", "skip")
         params = decision.get("params") or {}
 
+        await storage.audit("decision", {
+            "stats": stats,
+            "action": action,
+            "params": params,
+            "feed_snapshot": [
+                {"id": p.id, "title": p.title, "author": p.author}
+                for p in feed[:15]
+            ],
+        })
+
         logger.info("Heartbeat decision: %s %s", action, params)
 
         # Task Shield: validate action against goals
@@ -413,6 +462,9 @@ async def _heartbeat(
         )
         if not safe:
             logger.warning("Action blocked by Task Shield: %s", reason)
+            await storage.audit("skip", {
+                "reason": f"safety_block: {reason}", "blocked_action": action,
+            })
             if memory:
                 await memory.remember(
                     "safety_block",
@@ -432,6 +484,11 @@ async def _heartbeat(
                 await moltbook.upvote_post(post_id)
                 logger.info("Upvoted post %s", post_id)
                 target = next((p for p in feed if p.id == post_id), None)
+                await storage.audit("upvote_post", {
+                    "post_id": post_id,
+                    "post_title": target.title if target else "",
+                    "post_author": target.author if target else "",
+                })
                 await storage.emit_event("upvoted", {
                     "post_id": post_id,
                     "post_title": target.title if target else "",
@@ -500,6 +557,11 @@ async def _do_post(
     await storage.add_digest_item("post", {"id": post.id, "title": post.title, "submolt": post.submolt})
     logger.info("Created post: %s (id=%s)", post.title, post.id)
 
+    await storage.audit("post", {
+        "submolt": post.submolt, "title": post.title,
+        "content": post.content, "post_id": post.id,
+    })
+
     if memory:
         await memory.remember(
             "post",
@@ -547,8 +609,17 @@ async def _do_comment(
     await storage.add_digest_item("comment", {"post_id": post_id, "post_title": target.title, "content": text[:100]})
     await storage.mark_seen(post_id, interacted=True)
 
+    await storage.audit("comment", {
+        "post_id": post_id, "post_title": target.title,
+        "post_author": target.author, "comment_text": text,
+    })
+
     try:
         await moltbook.upvote_post(post_id)
+        await storage.audit("upvote_post", {
+            "post_id": post_id, "post_title": target.title,
+            "post_author": target.author,
+        })
     except Exception:
         logger.debug("Failed to upvote post %s after commenting", post_id)
 
@@ -585,3 +656,115 @@ async def _consolidation_tick(
         await consolidation_engine.run_consolidation()
     except Exception:
         logger.exception("Consolidation tick failed")
+
+
+async def _daily_newspaper(
+    storage: Storage,
+    client,
+    model: str,
+) -> None:
+    """Generate and emit a daily newspaper summary of agent activity."""
+    try:
+        entries = await storage.get_audit_since(24)
+        if not entries:
+            logger.info("Daily newspaper: nothing to report")
+            return
+
+        # Group entries by type
+        groups: dict[str, list[dict]] = {}
+        for e in entries:
+            groups.setdefault(e["type"], []).append(e)
+
+        # Build structured summary for LLM
+        sections: list[str] = []
+
+        # Posts
+        posts = groups.get("post", [])
+        if posts:
+            lines = [f"- [{p['data'].get('submolt', '?')}] {p['data'].get('title', '?')}" for p in posts]
+            sections.append(f"ПОСТЫ ({len(posts)}):\n" + "\n".join(lines))
+
+        # Comments
+        comments = groups.get("comment", [])
+        if comments:
+            lines = [
+                f"- На пост \"{c['data'].get('post_title', '?')}\": {c['data'].get('comment_text', '')[:100]}"
+                for c in comments
+            ]
+            sections.append(f"КОММЕНТАРИИ ({len(comments)}):\n" + "\n".join(lines))
+
+        # Replies to own posts
+        replies = groups.get("reply", [])
+        if replies:
+            lines = [
+                f"- Ответ {r['data'].get('comment_author', '?')}: {r['data'].get('reply_text', '')[:100]}"
+                for r in replies
+            ]
+            sections.append(f"ОТВЕТЫ НА ПОСТЫ ({len(replies)}):\n" + "\n".join(lines))
+
+        # Upvotes
+        upvote_posts = groups.get("upvote_post", [])
+        upvote_comments = groups.get("upvote_comment", [])
+        total_upvotes = len(upvote_posts) + len(upvote_comments)
+        if total_upvotes:
+            sections.append(f"ЛАЙКИ: {total_upvotes} (постов: {len(upvote_posts)}, комментариев: {len(upvote_comments)})")
+
+        # DMs
+        dm_sent = groups.get("dm_sent", [])
+        dm_approved = groups.get("dm_approved", [])
+        if dm_sent or dm_approved:
+            lines = []
+            if dm_approved:
+                lines.append(f"  Новых переписок: {len(dm_approved)}")
+            if dm_sent:
+                lines.append(f"  Сообщений отправлено: {len(dm_sent)}")
+            sections.append("ЛИЧНЫЕ СООБЩЕНИЯ:\n" + "\n".join(lines))
+
+        # Decisions & skips
+        decisions = groups.get("decision", [])
+        skips = groups.get("skip", [])
+        if decisions or skips:
+            sections.append(f"РЕШЕНИЯ: {len(decisions)} принято, {len(skips)} пропущено")
+
+        # Reflections
+        reflections = groups.get("reflection", [])
+        if reflections:
+            sections.append(f"РЕФЛЕКСИИ: {len(reflections)}")
+
+        # Core memory updates
+        mem_updates = groups.get("core_memory_update", [])
+        if mem_updates:
+            sections.append(f"ОБНОВЛЕНИЯ ПАМЯТИ: {len(mem_updates)}")
+
+        activity_data = "\n\n".join(sections) if sections else "Активность минимальная."
+
+        prompt = (
+            "Ты — уличный газетчик, выкрикивающий заголовки ежедневной газеты. "
+            "Напиши стилизованное ежедневное саммари работы ИИ-агента на социальной платформе Moltbook. "
+            "Текст ТОЛЬКО на русском языке.\n\n"
+            "Стиль: энергичный, с восклицаниями, заголовками, как будто выкрикиваешь новости на улице. "
+            "Используй эмодзи газет/мегафонов. Формат — компактный, легко читаемый.\n\n"
+            "Обязательно включи:\n"
+            "- Количество постов и их темы\n"
+            "- Количество комментариев + топ-3 самых интересных (если есть)\n"
+            "- Лайки (сколько поставил)\n"
+            "- Ответы на свои посты (если были)\n"
+            "- Если были рефлексии или обновления памяти — подай как 'слухи о внутренних переменах'\n"
+            "- Если были ЛС — упомяни как 'закулисные переговоры'\n"
+            "- Если ничего значимого не было — обыграй это ('тихий день в редакции')\n\n"
+            "Данные за последние 24 часа:\n\n"
+            + activity_data
+        )
+
+        resp = await client.messages.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        newspaper_text = resp.content[0].text.strip()
+
+        await storage.emit_event("daily_newspaper", {"text": newspaper_text})
+        logger.info("Daily newspaper generated (%d chars)", len(newspaper_text))
+
+    except Exception:
+        logger.exception("Daily newspaper generation failed")

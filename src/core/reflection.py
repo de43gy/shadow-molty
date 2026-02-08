@@ -200,6 +200,18 @@ class ReflectionEngine:
         rejected = [p for p in validated if not p.get("approved", False)]
 
         if not approved:
+            if validated:
+                await self._storage.audit("reflection", {
+                    "proposals": [
+                        {
+                            "field": p.get("field"), "old_value": p.get("old_value"),
+                            "new_value": p.get("new_value"), "reason": p.get("reason"),
+                            "approved": False,
+                        }
+                        for p in rejected
+                    ],
+                    "old_version": None, "new_version": None,
+                })
             return {"accepted": 0, "rejected": len(rejected), "changes": []}
 
         strategy = await self._get_strategy()
@@ -224,6 +236,20 @@ class ReflectionEngine:
                 trigger="reflection",
                 perf=None,
             )
+
+        all_proposals = [
+            {
+                "field": p.get("field"), "old_value": p.get("old_value"),
+                "new_value": p.get("new_value"), "reason": p.get("reason"),
+                "approved": p.get("approved", False),
+            }
+            for p in validated
+        ]
+        await self._storage.audit("reflection", {
+            "proposals": all_proposals,
+            "old_version": old_version,
+            "new_version": strategy.get("version", old_version),
+        })
 
         return {
             "accepted": len(approved),
