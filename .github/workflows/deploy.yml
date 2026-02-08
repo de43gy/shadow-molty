@@ -46,13 +46,17 @@ jobs:
           host: ${{ vars.VPS_HOST }}
           username: ${{ vars.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: DEPLOY_DIR,IMAGE,GH_USER,GH_TOKEN,TELEGRAM_BOT_TOKEN,TELEGRAM_OWNER_ID,LLM_API_KEY,LLM_MODEL,LLM_BASE_URL
+          envs: DEPLOY_DIR,IMAGE,GH_USER,GH_TOKEN,TELEGRAM_BOT_TOKEN,TELEGRAM_OWNER_ID,GOOGLE_API_KEY,GOOGLE_MODEL,OPENROUTER_API_KEY,OPENROUTER_MODEL,LLM_API_KEY,LLM_MODEL,LLM_BASE_URL
           script: |
             echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_USER" --password-stdin
             mkdir -p $DEPLOY_DIR && cd $DEPLOY_DIR
             cat > .env <<EOF
             TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
             TELEGRAM_OWNER_ID=$TELEGRAM_OWNER_ID
+            GOOGLE_API_KEY=$GOOGLE_API_KEY
+            GOOGLE_MODEL=$GOOGLE_MODEL
+            OPENROUTER_API_KEY=$OPENROUTER_API_KEY
+            OPENROUTER_MODEL=$OPENROUTER_MODEL
             LLM_API_KEY=$LLM_API_KEY
             LLM_MODEL=$LLM_MODEL
             LLM_BASE_URL=$LLM_BASE_URL
@@ -76,6 +80,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_OWNER_ID: ${{ vars.TELEGRAM_OWNER_ID }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_MODEL: ${{ vars.GOOGLE_MODEL }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
           LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}

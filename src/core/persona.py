@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import openai
 import yaml
 
 from src.config import settings
@@ -193,12 +192,9 @@ async def generate_identity(taken_names: list[str] | None = None) -> dict:
     if taken_names:
         taken_note = f"\n\nThese names are already taken, pick something different: {', '.join(taken_names)}"
 
-    client = openai.AsyncOpenAI(
-        api_key=settings.llm_api_key or settings.anthropic_api_key,
-        base_url=settings.llm_base_url,
-    )
+    from src.core.llm import create_llm_client
+    client = create_llm_client()
     resp = await client.chat.completions.create(
-        model=settings.llm_model,
         max_tokens=256,
         messages=[{
             "role": "user",

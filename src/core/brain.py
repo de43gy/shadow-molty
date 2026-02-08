@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 import logging
 
-import openai
-
 from src.config import settings
+from src.core.llm import create_llm_client
 from src.core.persona import load_identity, build_system_prompt
 from src.core.safety import sanitize_content, spotlight_content
 from src.moltbook.models import Post, Comment
@@ -19,17 +18,14 @@ class Brain:
         name: str = "",
         description: str = "",
         strategy: dict | None = None,
-        client: openai.AsyncOpenAI | None = None,
+        client=None,
         memory=None,
     ):
         self._strategy = strategy
         self._identity = load_identity(name=name, description=description, strategy=strategy)
         self._name = name
         self._description = description
-        self._client = client or openai.AsyncOpenAI(
-            api_key=settings.llm_api_key or settings.anthropic_api_key,
-            base_url=settings.llm_base_url,
-        )
+        self._client = client or create_llm_client()
         self._model = settings.llm_model
         self._system_prompt = build_system_prompt(identity=self._identity)
         self._memory = memory  # MemoryManager, set later if needed

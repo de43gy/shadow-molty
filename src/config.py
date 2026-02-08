@@ -8,9 +8,24 @@ class Settings(BaseSettings):
     moltbook_api_key: str = Field(default="", alias="MOLTBOOK_API_KEY")
     telegram_bot_token: str = Field(alias="TELEGRAM_BOT_TOKEN")
     telegram_owner_id: int = Field(alias="TELEGRAM_OWNER_ID")
+    # Google Gemini (primary, free)
+    google_api_key: str = Field(default="", alias="GOOGLE_API_KEY")
+    google_model: str = Field(default="gemini-2.0-flash", alias="GOOGLE_MODEL")
+    google_base_url: str = Field(
+        default="https://generativelanguage.googleapis.com/v1beta/openai/",
+        alias="GOOGLE_BASE_URL",
+    )
+
+    # OpenRouter (fallback, free tier)
+    openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
+    openrouter_model: str = Field(default="", alias="OPENROUTER_MODEL")
+    openrouter_base_url: str = Field(
+        default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"
+    )
+
+    # Legacy / custom provider (backward compat)
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
-
     llm_base_url: str = Field(
         default="https://generativelanguage.googleapis.com/v1beta/openai/",
         alias="LLM_BASE_URL",

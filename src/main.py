@@ -1,9 +1,8 @@
 import asyncio
 import logging
 
-import openai
-
 from src.core import Brain
+from src.core.llm import create_llm_client
 from src.core.consolidation import ConsolidationEngine
 from src.core.memory import MemoryManager
 from src.core.persona import load_constitution
@@ -27,9 +26,8 @@ async def main() -> None:
     storage = Storage()
     await storage.init()
 
-    # Shared LLM client (OpenAI-compatible: Gemini, OpenRouter, Groq, etc.)
-    llm_api_key = settings.llm_api_key or settings.anthropic_api_key
-    client = openai.AsyncOpenAI(api_key=llm_api_key, base_url=settings.llm_base_url)
+    # Shared LLM client with multi-provider fallback
+    client = create_llm_client()
 
     api_key = settings.moltbook_api_key or await storage.get_state("moltbook_api_key") or ""
     moltbook = MoltbookClient(api_key=api_key)
