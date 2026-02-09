@@ -133,6 +133,17 @@ CREATE TABLE IF NOT EXISTS llm_usage (
     completion_tokens INTEGER NOT NULL DEFAULT 0,
     created_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS llm_usage_daily (
+    date TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    action TEXT NOT NULL,
+    requests INTEGER NOT NULL DEFAULT 0,
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (date, provider, model, action)
+);
 """
 
 
@@ -664,35 +675,34 @@ class Storage:
         )
         await self.db.commit()
 
+    async def compact_llm_usage(self, keep_days: int = 7) -> int:
+        """Aggregate detailed rows older than keep_days into llm_usage_daily."""
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).strftime("%Y-%m-%d")
+
+        # Aggregate old rows into daily table
+        await self.db.execute(
+            "INSERT INTO llm_usage_daily (date, provider, model, action, requests, prompt_tokens, completion_tokens) "
+            "SELECT substr(created_at, 1, 10), provider, model, action, "
+            "COUNT(*), SUM(prompt_tokens), SUM(completion_tokens) "
+            "FROM llm_usage WHERE created_at < ? "
+            "GROUP BY substr(created_at, 1, 10), provider, model, action "
+            "ON CONFLICT(date, provider, model, action) DO UPDATE SET "
+            "requests = requests + excluded.requests, "
+            "prompt_tokens = prompt_tokens + excluded.prompt_tokens, "
+            "completion_tokens = completion_tokens + excluded.completion_tokens",
+            (f"{cutoff}T00:00:00",),
+        )
+        # Delete compacted rows
+        cur = await self.db.execute(
+            "DELETE FROM llm_usage WHERE created_at < ?",
+            (f"{cutoff}T00:00:00",),
+        )
+        await self.db.commit()
+        return cur.rowcount
+
     async def get_llm_usage_report(self) -> str:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-        # Today: per provider/model/action
-        cur = await self.db.execute(
-            "SELECT provider, model, action, "
-            "COUNT(*) as requests, "
-            "SUM(prompt_tokens) as pt, "
-            "SUM(completion_tokens) as ct "
-            "FROM llm_usage WHERE created_at LIKE ? "
-            "GROUP BY provider, model, action "
-            "ORDER BY provider, model, requests DESC",
-            (f"{today}%",),
-        )
-        today_rows = await cur.fetchall()
-
-        # All time: per provider/model
-        cur2 = await self.db.execute(
-            "SELECT provider, model, "
-            "COUNT(*) as requests, "
-            "SUM(prompt_tokens) as pt, "
-            "SUM(completion_tokens) as ct "
-            "FROM llm_usage "
-            "GROUP BY provider, model ORDER BY requests DESC",
-        )
-        total_rows = await cur2.fetchall()
-
-        if not today_rows and not total_rows:
-            return "No LLM usage recorded yet."
 
         def fmt(n: int) -> str:
             if n >= 1_000_000:
@@ -701,18 +711,17 @@ class Storage:
                 return f"{n / 1_000:.1f}K"
             return str(n)
 
-        lines: list[str] = []
-
-        if today_rows:
-            lines.append(f"Today ({today}):\n")
+        def _render_section(rows, title: str) -> list[str]:
+            if not rows:
+                return []
+            lines = [f"{title}\n"]
             current_key = ""
-            for r in today_rows:
+            for r in rows:
                 key = f"{r['provider']}:{r['model']}"
                 if key != current_key:
                     if current_key:
                         lines.append("")
-                    # Provider subtotal for today
-                    sub = [x for x in today_rows if f"{x['provider']}:{x['model']}" == key]
+                    sub = [x for x in rows if f"{x['provider']}:{x['model']}" == key]
                     total_req = sum(x["requests"] for x in sub)
                     total_pt = sum(x["pt"] for x in sub)
                     total_ct = sum(x["ct"] for x in sub)
@@ -723,9 +732,43 @@ class Storage:
                     )
                     current_key = key
                 lines.append(f"  {r['action']}: {r['requests']} req, {fmt(r['pt'] + r['ct'])} tok")
+            return lines
+
+        # Today: from detailed llm_usage
+        cur = await self.db.execute(
+            "SELECT provider, model, action, "
+            "COUNT(*) as requests, SUM(prompt_tokens) as pt, SUM(completion_tokens) as ct "
+            "FROM llm_usage WHERE created_at LIKE ? "
+            "GROUP BY provider, model, action ORDER BY provider, model, requests DESC",
+            (f"{today}%",),
+        )
+        today_rows = [dict(r) for r in await cur.fetchall()]
+
+        # All time totals: detailed + aggregated
+        cur2 = await self.db.execute(
+            "SELECT provider, model, "
+            "SUM(requests) as requests, SUM(pt) as pt, SUM(ct) as ct FROM ("
+            "  SELECT provider, model, COUNT(*) as requests, "
+            "    SUM(prompt_tokens) as pt, SUM(completion_tokens) as ct "
+            "  FROM llm_usage GROUP BY provider, model "
+            "  UNION ALL "
+            "  SELECT provider, model, SUM(requests), "
+            "    SUM(prompt_tokens), SUM(completion_tokens) "
+            "  FROM llm_usage_daily GROUP BY provider, model"
+            ") GROUP BY provider, model ORDER BY requests DESC",
+        )
+        total_rows = [dict(r) for r in await cur2.fetchall()]
+
+        if not today_rows and not total_rows:
+            return "No LLM usage recorded yet."
+
+        lines: list[str] = []
+        lines.extend(_render_section(today_rows, f"Today ({today}):"))
 
         if total_rows:
-            lines.append("\nAll time:")
+            if lines:
+                lines.append("")
+            lines.append("All time:")
             for r in total_rows:
                 lines.append(
                     f"  {r['provider']} ({r['model']}): "

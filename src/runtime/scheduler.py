@@ -657,6 +657,13 @@ async def _consolidation_tick(
     except Exception:
         logger.exception("Consolidation tick failed")
 
+    try:
+        compacted = await storage.compact_llm_usage()
+        if compacted:
+            logger.info("Compacted %d old LLM usage rows into daily aggregates", compacted)
+    except Exception:
+        logger.exception("LLM usage compaction failed")
+
 
 async def _daily_newspaper(
     storage: Storage,
