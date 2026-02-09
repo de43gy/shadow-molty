@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     # OpenRouter (fallback, free tier)
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
-    openrouter_model: str = Field(default="", alias="OPENROUTER_MODEL")
+    openrouter_model: str = Field(default="openrouter/free", alias="OPENROUTER_MODEL")
     openrouter_base_url: str = Field(
         default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"
     )

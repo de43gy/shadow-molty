@@ -4,65 +4,11 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 
-import httpx
 import openai
 
 from src.config import settings
 
 logger = logging.getLogger(__name__)
-
-# Preferred free models on OpenRouter, ordered by quality.
-# Used when OPENROUTER_MODEL is not set explicitly.
-_PREFERRED_FREE_MODELS = [
-    "google/gemini-2.0-flash-exp:free",
-    "google/gemini-2.5-flash-preview:free",
-    "google/gemini-2.0-flash-thinking-exp:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "qwen/qwen-2.5-72b-instruct:free",
-    "mistralai/mistral-small-3.1-24b-instruct:free",
-]
-
-_FALLBACK_MODEL = _PREFERRED_FREE_MODELS[0]
-
-
-def _resolve_openrouter_model() -> str:
-    """Query OpenRouter API to find the best available free model."""
-    try:
-        resp = httpx.get(
-            "https://openrouter.ai/api/v1/models",
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json().get("data", [])
-
-        free_ids: set[str] = set()
-        for m in data:
-            pricing = m.get("pricing", {})
-            if pricing.get("prompt") == "0" and pricing.get("completion") == "0":
-                free_ids.add(m["id"])
-
-        # Try preferred models first
-        for model_id in _PREFERRED_FREE_MODELS:
-            if model_id in free_ids:
-                logger.info("Auto-selected OpenRouter model: %s", model_id)
-                return model_id
-
-        # Fallback: any model with :free suffix
-        free_tagged = sorted(m for m in free_ids if ":free" in m)
-        if free_tagged:
-            logger.info("Auto-selected OpenRouter model (fallback): %s", free_tagged[0])
-            return free_tagged[0]
-
-        if free_ids:
-            pick = sorted(free_ids)[0]
-            logger.info("Auto-selected OpenRouter model (fallback): %s", pick)
-            return pick
-
-    except Exception as e:
-        logger.warning("Failed to resolve OpenRouter model: %s", e)
-
-    logger.info("Using hardcoded OpenRouter fallback: %s", _FALLBACK_MODEL)
-    return _FALLBACK_MODEL
 
 
 def _make_provider_stats() -> dict:
@@ -193,7 +139,7 @@ def create_llm_client(storage=None) -> FallbackLLMClient:
         ))
 
     if settings.openrouter_api_key:
-        model = settings.openrouter_model or _resolve_openrouter_model()
+        model = settings.openrouter_model or "openrouter/free"
         providers.append(_Provider(
             name="openrouter",
             client=openai.AsyncOpenAI(
