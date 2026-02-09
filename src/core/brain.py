@@ -47,7 +47,7 @@ class Brain:
     def identity(self) -> dict:
         return self._identity
 
-    async def _ask(self, user_prompt: str, max_tokens: int = 1024) -> str:
+    async def _ask(self, user_prompt: str, max_tokens: int = 1024, action: str = "unknown") -> str:
         """Send a single-turn message and return the text response."""
         system = self._system_prompt
 
@@ -63,6 +63,7 @@ class Brain:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_prompt},
             ],
+            _action=action,
         )
         return response.choices[0].message.content
 
@@ -73,7 +74,7 @@ class Brain:
     async def answer_question(self, question: str) -> str:
         """Free-form Q&A for the /ask command."""
         try:
-            return await self._ask(f"Answer this question:\n\n{question}")
+            return await self._ask(f"Answer this question:\n\n{question}", action="answer_question")
         except Exception:
             logger.exception("answer_question failed")
             return "Sorry, I couldn't process that question right now."
@@ -121,7 +122,7 @@ class Brain:
         prompt = spotlight_content(trusted, untrusted)
 
         try:
-            raw = await self._ask(prompt, max_tokens=1500)
+            raw = await self._ask(prompt, max_tokens=1500, action="generate_post")
             return self._parse_json(raw)
         except Exception:
             logger.exception("generate_post failed")
@@ -157,7 +158,7 @@ class Brain:
         prompt = spotlight_content(trusted, untrusted)
 
         try:
-            raw = await self._ask(prompt, max_tokens=512)
+            raw = await self._ask(prompt, max_tokens=512, action="generate_comment")
             return self._clean_text_response(raw)
         except Exception:
             logger.exception("generate_comment failed")
@@ -212,7 +213,7 @@ class Brain:
         prompt = spotlight_content(trusted, untrusted)
 
         try:
-            raw = await self._ask(prompt, max_tokens=512)
+            raw = await self._ask(prompt, max_tokens=512, action="decide_action")
             return self._parse_json(raw)
         except Exception:
             logger.exception("decide_action failed")
@@ -258,7 +259,7 @@ class Brain:
         prompt = spotlight_content(trusted, untrusted)
 
         try:
-            raw = await self._ask(prompt, max_tokens=512)
+            raw = await self._ask(prompt, max_tokens=512, action="generate_reply")
             return self._clean_text_response(raw)
         except Exception:
             logger.exception("generate_reply failed")
@@ -298,7 +299,7 @@ class Brain:
         prompt = spotlight_content(trusted, untrusted)
 
         try:
-            raw = await self._ask(prompt, max_tokens=512)
+            raw = await self._ask(prompt, max_tokens=512, action="generate_dm_reply")
             result = self._parse_json(raw)
             return {
                 "content": str(result.get("content", "")),
@@ -323,7 +324,7 @@ class Brain:
         prompt = spotlight_content(trusted, untrusted)
 
         try:
-            raw = await self._ask(prompt, max_tokens=8)
+            raw = await self._ask(prompt, max_tokens=8, action="should_interact")
             return raw.strip().lower().startswith("yes")
         except Exception:
             logger.exception("should_interact failed")

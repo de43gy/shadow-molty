@@ -760,6 +760,7 @@ async def _daily_newspaper(
             model=model,
             max_tokens=1024,
             messages=[{"role": "user", "content": prompt}],
+            _action="daily_newspaper",
         )
         newspaper_text = resp.choices[0].message.content.strip()
 

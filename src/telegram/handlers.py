@@ -17,6 +17,7 @@ HELP_TEXT = (
     "Available commands:\n"
     "/register — register agent on Moltbook\n"
     "/status — agent status & stats\n"
+    "/usage — LLM token usage per provider\n"
     "/search <query> — search Moltbook\n"
     "/ask <question> — queue a question for the LLM\n"
     "/post <submolt> <title> | <content> — create a post\n"
@@ -37,6 +38,7 @@ def register_handlers(router: Router) -> None:
     router.message.register(cmd_start, Command("start"))
     router.message.register(cmd_register, Command("register"))
     router.message.register(cmd_status, Command("status"))
+    router.message.register(cmd_usage, Command("usage"))
     router.message.register(cmd_search, Command("search"))
     router.message.register(cmd_ask, Command("ask"))
     router.message.register(cmd_post, Command("post"))
@@ -122,6 +124,15 @@ async def cmd_status(message: Message, storage: Storage, moltbook: MoltbookClien
         await message.answer(text)
     except Exception as e:
         logger.exception("cmd_status failed")
+        await message.answer(f"Error: {e}")
+
+
+async def cmd_usage(message: Message, storage: Storage) -> None:
+    try:
+        report = await storage.get_llm_usage_report()
+        await message.answer(report)
+    except Exception as e:
+        logger.exception("cmd_usage failed")
         await message.answer(f"Error: {e}")
 
 

@@ -117,6 +117,7 @@ class ReflectionEngine:
                 model=self._model,
                 max_tokens=1024,
                 messages=[{"role": "user", "content": prompt}],
+                _action="reflect",
             )
             reflection_text = resp.choices[0].message.content
 
@@ -148,6 +149,7 @@ class ReflectionEngine:
                 model=self._model,
                 max_tokens=1024,
                 messages=[{"role": "user", "content": prompt}],
+                _action="reflect_propose",
             )
             text = resp.choices[0].message.content.strip()
             start = text.find("[")
@@ -183,6 +185,7 @@ class ReflectionEngine:
                 model=self._model,
                 max_tokens=1024,
                 messages=[{"role": "user", "content": prompt}],
+                _action="reflect_validate",
             )
             text = resp.choices[0].message.content.strip()
             start = text.find("[")

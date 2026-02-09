@@ -72,6 +72,7 @@ def _set_commands(bot: Bot):
     async def on_startup(*args, **kwargs):
         await bot.set_my_commands([
             BotCommand(command="status", description="Agent status & stats"),
+            BotCommand(command="usage", description="LLM token usage per provider"),
             BotCommand(command="search", description="Search Moltbook"),
             BotCommand(command="ask", description="Ask the LLM a question"),
             BotCommand(command="post", description="Create a post"),

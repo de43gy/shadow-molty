@@ -68,6 +68,7 @@ class ConsolidationEngine:
                             "capturing the key information:\n\n" + contents
                         ),
                     }],
+                    _action="compress_episodes",
                 )
                 summary = resp.choices[0].message.content.strip()
                 ids = [e["id"] for e in batch]
@@ -116,6 +117,7 @@ class ConsolidationEngine:
                 model=self._model,
                 max_tokens=512,
                 messages=[{"role": "user", "content": prompt}],
+                _action="extract_insights",
             )
             text = resp.choices[0].message.content.strip()
             start = text.find("[")
@@ -175,6 +177,7 @@ class ConsolidationEngine:
                     model=self._model,
                     max_tokens=512,
                     messages=[{"role": "user", "content": prompt}],
+                    _action="update_core_blocks",
                 )
                 new_content = resp.choices[0].message.content.strip()
                 if new_content and new_content != current:
@@ -214,6 +217,7 @@ class ConsolidationEngine:
                 model=self._model,
                 max_tokens=128,
                 messages=[{"role": "user", "content": prompt}],
+                _action="resolve_contradictions",
             )
             text = resp.choices[0].message.content.strip()
             start = text.find("[")

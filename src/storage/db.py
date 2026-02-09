@@ -123,6 +123,16 @@ CREATE TABLE IF NOT EXISTS audit_log (
     data TEXT NOT NULL,
     created_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    action TEXT NOT NULL,
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT
+);
 """
 
 
@@ -641,6 +651,88 @@ class Storage:
             d["data"] = json.loads(d["data"]) if d["data"] else {}
             result.append(d)
         return result
+
+    # ── LLM usage ─────────────────────────────────────────────
+
+    async def save_llm_usage(
+        self, provider: str, model: str, action: str, prompt_tokens: int, completion_tokens: int,
+    ) -> None:
+        await self.db.execute(
+            "INSERT INTO llm_usage (provider, model, action, prompt_tokens, completion_tokens, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (provider, model, action, prompt_tokens, completion_tokens, _now()),
+        )
+        await self.db.commit()
+
+    async def get_llm_usage_report(self) -> str:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        # Today: per provider/model/action
+        cur = await self.db.execute(
+            "SELECT provider, model, action, "
+            "COUNT(*) as requests, "
+            "SUM(prompt_tokens) as pt, "
+            "SUM(completion_tokens) as ct "
+            "FROM llm_usage WHERE created_at LIKE ? "
+            "GROUP BY provider, model, action "
+            "ORDER BY provider, model, requests DESC",
+            (f"{today}%",),
+        )
+        today_rows = await cur.fetchall()
+
+        # All time: per provider/model
+        cur2 = await self.db.execute(
+            "SELECT provider, model, "
+            "COUNT(*) as requests, "
+            "SUM(prompt_tokens) as pt, "
+            "SUM(completion_tokens) as ct "
+            "FROM llm_usage "
+            "GROUP BY provider, model ORDER BY requests DESC",
+        )
+        total_rows = await cur2.fetchall()
+
+        if not today_rows and not total_rows:
+            return "No LLM usage recorded yet."
+
+        def fmt(n: int) -> str:
+            if n >= 1_000_000:
+                return f"{n / 1_000_000:.1f}M"
+            if n >= 1_000:
+                return f"{n / 1_000:.1f}K"
+            return str(n)
+
+        lines: list[str] = []
+
+        if today_rows:
+            lines.append(f"Today ({today}):\n")
+            current_key = ""
+            for r in today_rows:
+                key = f"{r['provider']}:{r['model']}"
+                if key != current_key:
+                    if current_key:
+                        lines.append("")
+                    # Provider subtotal for today
+                    sub = [x for x in today_rows if f"{x['provider']}:{x['model']}" == key]
+                    total_req = sum(x["requests"] for x in sub)
+                    total_pt = sum(x["pt"] for x in sub)
+                    total_ct = sum(x["ct"] for x in sub)
+                    lines.append(
+                        f"{r['provider']} ({r['model']}):\n"
+                        f"  {total_req} req, {fmt(total_pt + total_ct)} tok "
+                        f"({fmt(total_pt)} in + {fmt(total_ct)} out)"
+                    )
+                    current_key = key
+                lines.append(f"  {r['action']}: {r['requests']} req, {fmt(r['pt'] + r['ct'])} tok")
+
+        if total_rows:
+            lines.append("\nAll time:")
+            for r in total_rows:
+                lines.append(
+                    f"  {r['provider']} ({r['model']}): "
+                    f"{r['requests']} req, {fmt(r['pt'] + r['ct'])} tok"
+                )
+
+        return "\n".join(lines).strip()
 
     # ── Stats ─────────────────────────────────────────────────
 

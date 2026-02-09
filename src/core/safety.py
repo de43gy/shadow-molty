@@ -84,6 +84,7 @@ async def validate_action(
             model=model,
             max_tokens=128,
             messages=[{"role": "user", "content": prompt}],
+            _action="validate_action",
         )
         text = resp.choices[0].message.content.strip()
         start = text.find("{")

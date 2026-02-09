@@ -185,5 +185,6 @@ async def _translate(text: str, client, model: str) -> str:
                 + text
             ),
         }],
+        _action="translate",
     )
     return resp.choices[0].message.content.strip()

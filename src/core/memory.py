@@ -103,6 +103,7 @@ class MemoryManager:
                         f"Event: {content[:500]}"
                     ),
                 }],
+                _action="score_importance",
             )
             text = resp.choices[0].message.content.strip()
             match = re.search(r"(\d+(?:\.\d+)?)", text)

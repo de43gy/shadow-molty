@@ -196,6 +196,7 @@ async def generate_identity(taken_names: list[str] | None = None) -> dict:
     client = create_llm_client()
     resp = await client.chat.completions.create(
         max_tokens=256,
+        _action="generate_identity",
         messages=[{
             "role": "user",
             "content": (

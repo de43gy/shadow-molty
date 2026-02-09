@@ -27,7 +27,7 @@ async def main() -> None:
     await storage.init()
 
     # Shared LLM client with multi-provider fallback
-    client = create_llm_client()
+    client = create_llm_client(storage=storage)
 
     api_key = settings.moltbook_api_key or await storage.get_state("moltbook_api_key") or ""
     moltbook = MoltbookClient(api_key=api_key)
